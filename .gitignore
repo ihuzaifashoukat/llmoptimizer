@@ -1,0 +1,61 @@
+# Node & TypeScript
+node_modules/
+dist/
+build/
+out/
+coverage/
+*.tsbuildinfo
+.eslintcache
+.tscache/
+
+# Package managers
+pnpm-lock.yaml
+yarn.lock
+package-lock.json
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Framework builds
+.next/
+.nuxt/
+.svelte-kit/
+.output/
+.vercel/
+.netlify/
+functions/lib/
+
+# Tooling caches
+.turbo/
+.cache/
+.vite/
+.parcel-cache/
+storybook-static/
+playwright-report/
+test-results/
+cypress/videos/
+cypress/screenshots/
+
+# IDE & OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+
+# Misc
+*.log
+*.tgz
+*.swp
+*.swo
+
+# Project specific
+test-site/out/
+

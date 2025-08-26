@@ -16,6 +16,8 @@ export default defineConfig({
     nuxt: 'src/integrations/nuxt.ts',
     remix: 'src/integrations/remix.ts',
     node: 'src/integrations/node.ts',
+    auto: 'src/integrations/auto.ts',
+    docs: 'src/integrations/docs.ts',
   },
   shims: false,
   minify: false,

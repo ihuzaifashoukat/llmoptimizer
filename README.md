@@ -1,55 +1,163 @@
 ## llmoptimizer
 
-Generate an `llm.txt` Markdown summary of your website’s structure and key data for LLMs. Framework-agnostic with helpers for Next.js, React, Vue, and static sites.
+Generate an llms.txt that gives AI models a clean, structured summary of your website or docs. It works with any site and has first-class helpers for popular frameworks (Vite, Next.js, Nuxt, Astro, Remix), plus a docs generator for Markdown/MDX.
 
-### Why
+Node.js 18+ is required.
 
-- Give LLMs a compact overview of your site: pages, metadata, headings, JSON-LD, locales, and key links.
-- Works via crawling a live URL, reading a sitemap, or scanning a static export folder.
-- Use the CLI in CI/CD or the API in build steps.
+---
 
-### Install
+## Why This Matters
+
+- Clear signal for AI: Produce a compact, consistent llms.txt that lists your important pages with key metadata, headings, and structured data.
+- Multiple input modes: Crawl a live site, read a sitemap, scan static builds, or run framework-aware adapters without extra setup.
+- Docs-first: Generate llms.txt and llms-full.txt directly from Markdown/MDX, including optional sectioned link lists and concatenated context files.
+- Robots made easy: Generate a robots.txt that explicitly allows popular search and LLM crawlers, and auto-includes your sitemap.
+
+---
+
+## Install
 
 ```
 npm install --save-dev llmoptimizer
 ```
 
-Node.js 18+ is required.
+---
 
-### Quickstart (CLI)
+## Quick Starts
+
+Pick the scenario that matches your project. All commands write llms.txt by default.
 
 ```
-# Crawl a live site
-npx llmoptimizer generate --url https://example.com --out llm.txt --max-pages 150
+# 1) Crawl production
+npx llmoptimizer generate --url https://example.com --out public/llms.txt --max-pages 200
 
-# From a sitemap
-npx llmoptimizer generate --sitemap https://example.com/sitemap.xml --out llm.txt
+# 2) Use a sitemap
+npx llmoptimizer generate --sitemap https://example.com/sitemap.xml --out llms.txt
 
-# From a static export (e.g., Next.js `out/`)
-npx llmoptimizer generate --root ./out --out llm.txt
+# 3) Scan a static export (e.g., Next.js out/)
+npx llmoptimizer generate --root ./out --out ./out/llms.txt
 
-# From a build (no crawling): scan common build dirs
-npx llmoptimizer generate --build-scan --project-root . --out llm.txt
-# Specify build dirs
-npx llmoptimizer generate --build-scan --build-dirs dist build .output/public .next/server/pages --out llm.txt
-# Filter build-scan to specific route paths
-npx llmoptimizer generate --build-scan --include "/blog/*" "/docs/*" --exclude "/admin/*" --out llm.txt
+# 4) Build-scan (no crawling): search common build dirs for HTML
+npx llmoptimizer generate --build-scan --project-root . --out llms.txt
+
+# 5) Docs (Markdown/MDX) → llms.txt + llms-full.txt + stats
+npx llmoptimizer docs --docs-dir docs --out-dir build --site-url https://example.com --base-url /
+
+# 6) Autodetect best mode (docs → build-scan → adapter → crawl)
+npx llmoptimizer auto --url https://example.com
+
+# 7) Generate robots.txt that allows search + LLM crawlers
+npx llmoptimizer robots --out public/robots.txt --sitemap https://example.com/sitemap.xml
 ```
 
-Options:
+Common flags:
+- `--format markdown|json` (default markdown)
+- `--include <glob...>` / `--exclude <glob...>` to filter routes/files
+- `--concurrency <n>` and `--delay-ms <ms>` for performance/throttling
+- `--no-robots` to skip robots.txt checks in network modes
 
-- `--format markdown|json` (default `markdown`)
-- `--theme default|compact|detailed` (default `default`)
-- `--max-pages <n>` limit processed pages
-- `--concurrency <n>` parallel fetches
-- `--include <glob...>` / `--exclude <glob...>` simple pattern filters
-- `--no-robots` ignore `robots.txt`
+---
 
-### Config (optional)
+## What llmoptimizer Generates
 
-Create `llmoptimizer.config.ts`:
+llmoptimizer extracts and summarizes the signals that matter to AI and search.
+
+- Site summary: base URL, generation time, totals
+- Per page (varies by mode):
+  - Basics: URL, title, description, canonical
+  - Metadata: robots meta, keywords, social (OpenGraph/Twitter)
+  - Structure: H1–H4 headings, snippets, estimated words/tokens
+  - Links/media: internal/external link counts, images, missing alt counts
+  - Structured data: schema.org JSON‑LD types summary
+
+Docs mode also emits:
+- `llms.txt`: Sectioned link list (or auto-grouped) with a short intro
+- `llms-full.txt`: Concatenated cleaned content for all docs
+- `llms-stats.json`: Headings, words, token estimates per doc + totals
+- Optional: `llms-ctx.txt` and `llms-ctx-full.txt` context bundles
+
+---
+
+## CLI Overview
+
+1) Generate from a site/build
+
+```
+npx llmoptimizer generate [options]
+
+# Modes
+  --url <https://...>           # crawl production (obeys robots by default)
+  --sitemap <url>               # seed from sitemap.xml
+  --root <dir>                  # scan a static export/build dir for HTML
+  --build-scan                  # scan common build dirs under --project-root
+  --adapter --project-root .    # framework-aware route fetch (when supported)
+
+# Output & format
+  --out <file>                  # default: llms.txt
+  --format markdown|json
+  --theme default|compact|detailed
+
+# Filtering & perf
+  --include <glob...> --exclude <glob...>
+  --max-pages <n> --concurrency <n> --delay-ms <ms>
+  --no-robots
+```
+
+2) Docs (Markdown/MDX) → llms files
+
+```
+npx llmoptimizer docs \
+  --docs-dir docs --out-dir build --site-url https://example.com --base-url / \
+  --include-blog --blog-dir blog \
+  --ignore "advanced/*" "private/*" \
+  --order "getting-started/*" "guides/*" "api/*" \
+  --ignore-path docs --add-path api \
+  --exclude-imports --remove-duplicate-headings \
+  --generate-markdown-files \
+  --emit-ctx --ctx-out llms-ctx.txt --ctx-full-out llms-ctx-full.txt \
+  --llms-filename llms.txt --llms-full-filename llms-full.txt \
+  --stats-file llms-stats.json \
+  --title "Your Docs" --description "Great docs" --version 1.0.0 \
+  --sections-file ./examples/sections.json \
+  --optional-links-file ./examples/optional-links.json
+```
+
+What “sections” mean:
+- You can provide explicit sections as JSON (see `examples/sections.json`).
+- Or omit them and let auto-sections group content like Getting Started, Guides, API, Tutorials, Reference.
+- “Optional” links are supported via a separate JSON file (see `examples/optional-links.json`).
+
+3) Autodetect best mode
+
+```
+npx llmoptimizer auto \
+  --project-root . \
+  --url https://example.com \
+  --out llms.txt --format markdown --concurrency 8 --max-pages 200 --delay-ms 0
+```
+
+4) Robots.txt generator
+
+```
+npx llmoptimizer robots \
+  --out public/robots.txt \
+  --sitemap https://example.com/sitemap.xml \
+  --no-allow-all        # optional: do not add Allow: /
+  --no-llm-allow        # optional: skip explicit LLM bot allow-list
+  --no-search-allow     # optional: skip search bot allow-list
+  --search-bot Googlebot --search-bot Bingbot  # override bots
+```
+
+It allows popular LLM crawlers (e.g., GPTBot, Google‑Extended, Claude, Perplexity, CCBot, Applebot‑Extended, Meta‑ExternalAgent, Amazonbot, Bytespider) and mainstream search bots (Googlebot, Bingbot, DuckDuckBot, Slurp, Baiduspider, YandexBot).
+
+---
+
+## Configuration (optional)
+
+Create `llmoptimizer.config.ts` if you prefer defaults on the CLI.
 
 ```ts
+// llmoptimizer.config.ts
 import { defineConfig } from 'llmoptimizer'
 
 export default defineConfig({
@@ -57,260 +165,171 @@ export default defineConfig({
   obeyRobots: true,
   maxPages: 200,
   concurrency: 8,
+  network: { delayMs: 100, sitemap: { concurrency: 6, delayMs: 50 } },
   render: { theme: 'default' },
-  output: { file: 'public/llm.txt', format: 'markdown' },
-})
-```
-
-### API
-
-```ts
-import {
-  generateFromUrl,
-  generateFromSitemap,
-  generateFromStatic,
-  generate,
-  generateFromAdapter,
-} from 'llmoptimizer'
-
-// Crawl from a base URL
-await generateFromUrl({ baseUrl: 'https://example.com', maxPages: 100, concurrency: 5, obeyRobots: true, outFile: 'llm.txt', format: 'markdown' })
-
-// Use sitemap as seeds
-await generateFromSitemap({ sitemapUrl: 'https://example.com/sitemap.xml', outFile: 'llm.txt', format: 'markdown', maxPages: 200, concurrency: 8, obeyRobots: true })
-
-// Scan static HTML
-await generateFromStatic({ rootDir: './out', outFile: 'llm.txt', format: 'markdown' })
-
-// Directly from HTML strings
-await generate([
-  { url: 'https://example.com', html: '<html>...</html>' },
-], { outFile: 'llm.txt', format: 'markdown', baseUrl: 'https://example.com' })
-
-// Use framework adapter (e.g., Next.js) to infer routes and fetch them
-await generateFromAdapter({
-  projectRoot: process.cwd(),
-  baseUrl: 'https://example.com',
-  outFile: 'llm.txt',
-  format: 'markdown',
-  concurrency: 8,
-  obeyRobots: true,
-})
-```
-
-### Next.js integration
-
-- After `next build && next export`, run: `npx llmoptimizer generate --root ./out --out ./out/llm.txt`.
-- Or crawl Production: `npx llmoptimizer generate --url https://yourdomain.com --out public/llm.txt`.
-- Or adapter mode (static-like routes only): `npx llmoptimizer generate --adapter --project-root . --url https://yourdomain.com --out public/llm.txt`.
-
-Programmatic helper:
-
-```ts
-// scripts/postbuild-llm.ts
-import { runAfterNextBuild } from 'llmoptimizer/next'
-
-await runAfterNextBuild({
-  projectRoot: process.cwd(),
-  baseUrl: 'https://yourdomain.com',
-  outFile: 'public/llm.txt',
-  mode: 'adapter', // or 'static' (with staticDir) or 'crawl'
-})
-```
-
-package.json:
-
-```json
-{
-  "scripts": {
-    "postbuild": "node scripts/postbuild-llm.ts"
-  }
-}
-```
-
-### Vite plugin
-
-Add to `vite.config.ts`:
-
-```ts
-import { defineConfig } from 'vite'
-import { llmOptimizer } from 'llmoptimizer/vite'
-
-export default defineConfig({
-  plugins: [llmOptimizer({ mode: 'static' })],
-})
-```
-
-This writes `llm.txt` into your build output directory after build. Use `mode: 'crawl'` with `baseUrl` to fetch from production.
-
-### What goes into llm.txt
-
-- Header includes: "Generated By: LLMOPTIMIZER BY Huzaifa Shoukat".
-- Site summary: base URL, generation time, inferred locales.
-- For each page (SEO-focused):
-  - Basics: URL, locale, dir, title, description, canonical
-  - Last Modified (for static/build scans)
-  - Metadata: robots, keywords, viewport, charset, generator
-  - Social: OpenGraph, Twitter
-  - Intl: hreflang alternates
-  - Structure: H1–H4 headings; breadcrumbs (from JSON-LD)
-  - Content: snippet and word count estimate
-  - Links: internal/external counts; sample of important links with rel
-  - Media: image count and missing alt count; sample of images
-  - Structured Data: JSON-LD types summary
-
-### Design & Extensibility
-
-- Core is framework-agnostic and uses the web standard `fetch` (Node 18+).
-- HTML parsing via `cheerio`. Sitemap parsing via `fast-xml-parser`.
-- Adapters layer (e.g., Next.js) can infer routes for framework-aware flows.
-- Output emitters support `markdown` and `json`.
-- You can pass a custom markdown renderer via config or CLI template file.
-- Built-in themes: `default`, `compact` (one-line-per-page), `detailed` (adds table of contents and site-wide totals).
-
-Custom Markdown via config:
-
-```ts
-import { defineConfig } from 'llmoptimizer'
-export default defineConfig({
-  render: {
-    markdown: (site, pages) => `# Custom llm.txt\nPages: ${pages.length}\n`,
+  output: { file: 'public/llms.txt', format: 'markdown' },
+  robots: {
+    outFile: 'public/robots.txt',
+    allowAll: true,
+    llmAllow: true,
+    searchAllow: true,
+    sitemaps: ['https://example.com/sitemap.xml'],
   },
 })
 ```
 
-Or via CLI template file:
+---
 
-```ts
-// llm-template.mjs
-export default function markdown(site, pages) {
-  return `# ${site.baseUrl || ''} (${pages.length} pages)`
-}
-```
+## Framework Integrations
 
-Then run: `npx llmoptimizer generate --url https://example.com --template ./llm-template.mjs`
+All integrations default to writing llms.txt. You can swap to JSON via `format: 'json'`.
 
-### Roadmap
-
-- Vite/Rollup plugin hooks to auto-generate on build.
-- Deeper robots.txt parsing (Allow/Disallow precedence per RFC).
-- Per-page custom extractors and ignore rules.
-- Dedup and content hashing for change detection.
-
-### License
-
-MIT
-
-### Framework Integrations (Build-Time)
-
-- Vite (React, Vue, Svelte, Solid, Preact)
-  - Add to `vite.config.ts`:
-  - Example:
+- Vite (React/Vue/Svelte/Solid/Preact)
   ```ts
+  // vite.config.ts
   import { defineConfig } from 'vite'
   import { llmOptimizer } from 'llmoptimizer/vite'
-  export default defineConfig({ plugins: [llmOptimizer({ mode: 'static' })] })
-  ```
-  - Output: `llm.txt` written to `dist/` after build. Use `{ mode: 'crawl', baseUrl: 'https://site.com' }` to crawl prod.
-  - Or, scan build output without crawling: `npx llmoptimizer generate --build-scan --out dist/llm.txt`
 
-- Next.js (App or Pages)
-  - CLI (adapter mode): `npx llmoptimizer generate --adapter --project-root . --url https://yourdomain.com --out public/llm.txt`
-  - Script helper:
+  export default defineConfig({
+    plugins: [
+      llmOptimizer({
+        mode: 'static', // or 'crawl' with baseUrl
+        robots: { outFile: 'dist/robots.txt' },
+      }),
+    ],
+  })
+  ```
+
+- Next.js
   ```ts
   // scripts/postbuild-llm.ts
   import { runAfterNextBuild } from 'llmoptimizer/next'
-  await runAfterNextBuild({ baseUrl: 'https://yourdomain.com', outFile: 'public/llm.txt', mode: 'adapter' })
+  await runAfterNextBuild({
+    projectRoot: process.cwd(),
+    baseUrl: 'https://yourdomain.com',
+    outFile: 'public/llms.txt',
+    mode: 'adapter', // 'static' with staticDir or 'crawl'
+    robots: true,
+  })
+  // package.json
+  // { "scripts": { "postbuild": "node scripts/postbuild-llm.ts" } }
   ```
-  - Add to package.json: `{ "scripts": { "postbuild": "node scripts/postbuild-llm.ts" } }`
-  - No-crawl build scan: `npx llmoptimizer generate --build-scan --build-dirs .next/server/pages --out public/llm.txt`
+
+- Nuxt 3 (Nitro)
+  ```ts
+  // nuxt.config.ts
+  export default defineNuxtConfig({
+    modules: [['llmoptimizer/nuxt', { mode: 'static' }]],
+  })
+  // For crawl mode, add { baseUrl: 'https://yourdomain.com' }
+  ```
 
 - Astro
-  - `astro.config.mjs`:
   ```ts
+  // astro.config.mjs
   import { defineConfig } from 'astro/config'
   import llm from 'llmoptimizer/astro'
   export default defineConfig({ integrations: [llm({ mode: 'static' })] })
   ```
 
-- Nuxt 3 (Nitro)
-  - `nuxt.config.ts`:
-  ```ts
-  export default defineNuxtConfig({
-    modules: [['llmoptimizer/nuxt', { mode: 'static' }]],
-  })
-  ```
-  - For crawl mode, pass `baseUrl` and optional `outFile`.
-
 - Remix
-  - Add a postbuild script and call the helper:
   ```ts
   // scripts/postbuild-llm.mjs
   import { runAfterRemixBuild } from 'llmoptimizer/remix'
-  await runAfterRemixBuild({ mode: 'crawl', baseUrl: 'https://your.app', outFile: 'public/llm.txt' })
+  await runAfterRemixBuild({ mode: 'crawl', baseUrl: 'https://your.app', outFile: 'public/llms.txt' })
   ```
-  - package.json: `{ "scripts": { "postbuild": "node scripts/postbuild-llm.mjs" } }`
 
-- Create React App / Any Static React
-  - After `react-scripts build`, run: `npx llmoptimizer generate --root build --out build/llm.txt`
-
-- Generic Node/Express/SSR
-  - Use the generic helper:
+- Generic Node/SSR
   ```ts
   // scripts/postbuild-llm.mjs
   import { runAfterBuild } from 'llmoptimizer/node'
-  await runAfterBuild({ mode: 'crawl', baseUrl: 'https://yourdomain.com', outFile: 'llm.txt' })
+  await runAfterBuild({ mode: 'crawl', baseUrl: 'https://yourdomain.com', outFile: 'llms.txt' })
   ```
 
-### Best Practices for Great llm.txt
+---
 
-- Clear metadata: title, description, canonical, OG/Twitter tags.
-- JSON-LD: Use appropriate schema.org types for key entities.
-- Information hierarchy: meaningful H1–H3 headings and concise copy.
-- Internationalization: set `<html lang>` and `hreflang` alternates.
-- Sitemaps: ensure up-to-date `sitemap.xml` to cover important pages.
-- Robots: allow crawling of public pages that should appear in llm.txt.
+## Docs Integration Details (Markdown/MDX)
 
-### Adapter Route Params (Dynamic Routes)
+Use the CLI or the API. The integration cleans content, removes duplicate headings, optionally inlines local partials, and can generate cleaned per-doc .md files.
 
-- For dynamic routes (e.g., `/blog/:slug`), provide sample values so adapter mode can fetch real pages.
-  - Config `llmoptimizer.config.ts`:
-  ```ts
-  import { defineConfig } from 'llmoptimizer'
-  export default defineConfig({
-    params: {
-      slug: ['hello-world', 'getting-started'],
-      id: ['1', '42']
-    },
-    // per-route param overrides
-    routeParams: {
-      '/docs/:lang/getting-started': { lang: ['en', 'fr'] }
-    },
-    // explicitly add patterns if adapter misses them
-    routes: ['/pricing', '/blog/:slug']
-  })
-- SvelteKit
-  - Uses Vite plugin (same as above). You can also leverage adapter mode for route inference:
-  ```bash
-  npx llmoptimizer generate --adapter --project-root . --url https://yourdomain.com --out static/llm.txt --route-params ./params.json
-  ```
-  - `params.json` example: `{ "slug": ["welcome"], "lang": ["en","fr"] }`
+Programmatic example:
+```ts
+// scripts/generate-docs-llm.mjs
+import { docsLLMs } from 'llmoptimizer/docs'
 
-- Angular
-  - Use a postbuild script with the generic Node helper or CLI:
-  ```json
-  {
-    "scripts": {
-      "build": "ng build",
-      "postbuild": "npx llmoptimizer generate --root dist/your-app --out dist/your-app/llm.txt"
-    }
-  }
-  ```
-  - Or crawl production: `npx llmoptimizer generate --url https://yourdomain.com --out llm.txt`
-  ```
-  - Or via CLI: `--params ./params.json` where `params.json` is `{ "slug": ["hello-world"], "id": ["1","2"] }`.
-  - Route-specific: `--route-params ./route-params.json` where `{ "/docs/:lang/getting-started": { "lang": ["en","fr"] } }`.
+const plugin = docsLLMs({
+  docsDir: 'docs',
+  includeBlog: true,
+  ignoreFiles: ['advanced/*', 'private/*'],
+  includeOrder: ['getting-started/*', 'guides/*', 'api/*'],
+  pathTransformation: { ignorePaths: ['docs'], addPaths: ['api'] },
+  excludeImports: true,
+  removeDuplicateHeadings: true,
+  generateMarkdownFiles: true,
+  autoSections: true,
+  // Optional: explicit sections/links
+  // sections: [...],
+  // optionalLinks: [...],
+})
 
-### GitHub Actions (CI)
+await plugin.postBuild({
+  outDir: 'build',
+  siteConfig: { url: 'https://example.com', baseUrl: '/', title: 'Docs', tagline: 'Great docs' },
+})
+```
 
-Use the example workflow at `.github/workflows/llmoptimizer.yml.example` and adapt it to your build output folders (`dist/`, `build/`, etc.). It builds your project, runs llmoptimizer in static mode, and uploads `llm.txt` as an artifact.
+Outputs in `build/`:
+- `llms.txt` and `llms-full.txt`
+- `llms-stats.json` with word/token estimates
+- Optionally `llms-ctx.txt` and `llms-ctx-full.txt` (when `emitCtx`)
+- Optional cleaned per-doc `.md` files used for link targets
+
+See `examples/sections.json` and `examples/optional-links.json` for input formats.
+
+---
+
+## Smart Autoregistration (Auto)
+
+Prefer one helper that “just works”? Use the auto integration in a postbuild script. It picks from docs → build → adapter → crawl based on your repo and writes the right output.
+
+```ts
+// scripts/auto-llm.mjs
+import { autoPostbuild } from 'llmoptimizer/auto'
+const res = await autoPostbuild({ baseUrl: 'https://example.com', log: true })
+console.log(res) // { mode: 'docs'|'build'|'adapter'|'crawl', outPath: '...' }
+```
+
+Add to package.json: `{ "scripts": { "postbuild": "node scripts/auto-llm.mjs" } }`.
+
+---
+
+## Best Practices
+
+- Titles and descriptions: Ensure every page has good `<title>` and meta description.
+- Structured data: Use JSON‑LD for key entities; we summarize types in output.
+- Headings: Keep H1–H3 clear and scannable; these are extracted.
+- Internationalization: Use `<html lang>` and `hreflang` alternates when applicable.
+- Sitemaps: Keep `sitemap.xml` fresh for coverage.
+- Robots: Use the robots generator to allow search + LLM crawlers on public content.
+
+---
+
+## Troubleshooting
+
+- Empty or few pages: Check `--include/--exclude` filters and robots settings; try `--no-robots` for testing.
+- Dynamic routes (adapter mode): Provide sample params or ensure your framework exposes discoverable routes.
+- Rate limits: Lower `--concurrency` and add `--delay-ms` when crawling.
+- Wrong links in docs mode: Adjust `--ignore-path/--add-path` or provide `--site-url/--base-url`.
+
+---
+
+## Contact
+
+- Email: ihuzaifashoukat@gmail.com
+- GitHub: https://github.com/ihuzaifashoukat
+
+---
+
+## License
+
+MIT

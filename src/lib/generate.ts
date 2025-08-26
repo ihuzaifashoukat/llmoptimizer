@@ -5,7 +5,7 @@ import { extractFromHtml } from './extractor'
 import { toMarkdown, renderMarkdown } from './markdown'
 import { parseSitemapUrls } from './sitemap'
 import type { OutputFormat, PageExtract, SiteSummary } from './types'
-import { glob } from 'globby'
+import { globby } from 'globby'
 import { detectRoutes } from '../adapters'
 
 export interface GenerateCommonOptions {
@@ -22,12 +22,14 @@ export async function generateFromUrl(opts: {
   maxPages: number
   concurrency: number
   obeyRobots: boolean
+  requestDelayMs?: number
 } & GenerateCommonOptions) {
   const crawlRes = await crawl({
     startUrls: [opts.baseUrl],
     baseUrl: opts.baseUrl,
     maxPages: opts.maxPages,
     concurrency: opts.concurrency,
+    requestDelayMs: opts.requestDelayMs,
     obeyRobots: opts.obeyRobots,
     include: opts.include,
     exclude: opts.exclude,
@@ -48,16 +50,10 @@ export async function generateFromSitemap(opts: {
   maxPages: number
   concurrency: number
   obeyRobots: boolean
+  sitemapConcurrency?: number
+  sitemapDelayMs?: number
 } & GenerateCommonOptions) {
-  const res = await fetch(opts.sitemapUrl)
-  if (!res.ok) throw new Error(`Failed to fetch sitemap: ${opts.sitemapUrl}`)
-  const xml = await res.text()
-  let seeds = await parseSitemapUrls(xml)
-  // If sitemap index: keep only URLs matching base origin to avoid crawling the web
-  if (opts.baseUrl) {
-    const origin = new URL(opts.baseUrl).origin
-    seeds = seeds.filter((u) => new URL(u, origin).origin === origin)
-  }
+  const seeds = await collectSitemapUrls({ entry: opts.sitemapUrl, baseUrl: opts.baseUrl, limit: opts.maxPages, concurrency: opts.sitemapConcurrency ?? 4, delayMs: opts.sitemapDelayMs ?? 0 })
   const crawlRes = await crawl({
     startUrls: seeds.slice(0, opts.maxPages),
     baseUrl: opts.baseUrl ?? seeds[0],
@@ -79,7 +75,7 @@ export async function generateFromSitemap(opts: {
 
 export async function generateFromStatic(opts: { rootDir: string } & GenerateCommonOptions) {
   const root = path.resolve(opts.rootDir)
-  const files = await glob(['**/*.html', '**/*.htm'], { cwd: root, ignore: ['node_modules/**'] })
+  const files = await globby(['**/*.html', '**/*.htm'], { cwd: root, ignore: ['node_modules/**'] })
   const pages: PageExtract[] = []
   for (const rel of files) {
     const abs = path.join(root, rel)
@@ -134,6 +130,46 @@ function localesFrom(pages: PageExtract[]): string[] | undefined {
   return s.size ? Array.from(s) : undefined
 }
 
+async function collectSitemapUrls({ entry, baseUrl, limit, concurrency, delayMs }: { entry: string; baseUrl?: string; limit: number; concurrency: number; delayMs: number }): Promise<string[]> {
+  const out = new Set<string>()
+  const seen = new Set<string>()
+  const queue = new Set<string>([entry])
+  let last = 0
+  async function runOne(url: string) {
+    if (seen.has(url) || out.size >= limit) return
+    seen.add(url)
+    try {
+      if (delayMs) {
+        const now = Date.now()
+        const wait = Math.max(0, last + delayMs - now)
+        if (wait) await new Promise((r) => setTimeout(r, wait))
+        last = Date.now()
+      }
+      const res = await fetch(url)
+      if (!res.ok) return
+      const xml = await res.text()
+      let urls = await parseSitemapUrls(xml)
+      if (baseUrl) {
+        const origin = new URL(baseUrl).origin
+        urls = urls.filter((u) => new URL(u, origin).origin === origin)
+      }
+      for (const u of urls) {
+        if (out.size >= limit) break
+        if (/\.xml($|\?)/i.test(u)) queue.add(u)
+        else out.add(u)
+      }
+    } catch {
+      // ignore
+    }
+  }
+  while (queue.size && out.size < limit) {
+    const batch = Array.from(queue).slice(0, concurrency)
+    batch.forEach((u) => queue.delete(u))
+    await Promise.all(batch.map((u) => runOne(u)))
+  }
+  return Array.from(out)
+}
+
 // Build scan: find HTML in common build output folders and generate without network crawling
 export async function generateFromBuild(opts: {
   projectRoot?: string
@@ -160,7 +196,7 @@ export async function generateFromBuild(opts: {
     try {
       const stat = await fs.stat(absDir)
       if (!stat.isDirectory()) continue
-      const files = await glob(['**/*.html', '**/*.htm'], { cwd: absDir, ignore: ['node_modules/**'] })
+      const files = await globby(['**/*.html', '**/*.htm'], { cwd: absDir, ignore: ['node_modules/**'] })
       for (const rel of files) {
         const routePath = toRoutePath(rel)
         if (opts.include && !opts.include.some((p) => matchSimple(p, routePath))) continue

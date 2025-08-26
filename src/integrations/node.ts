@@ -15,7 +15,7 @@ export interface NodePostbuildOptions {
 
 export async function runAfterBuild(opts: NodePostbuildOptions = {}) {
   const mode = opts.mode ?? (opts.rootDir ? 'static' : 'crawl')
-  const outFile = opts.outFile ?? (opts.rootDir ? `${opts.rootDir}/llm.txt` : 'llm.txt')
+  const outFile = opts.outFile ?? (opts.rootDir ? `${opts.rootDir}/llms.txt` : 'llms.txt')
   const format = opts.format ?? 'markdown'
   if (mode === 'static') {
     if (!opts.rootDir) throw new Error('runAfterBuild requires rootDir in static mode')
@@ -31,4 +31,3 @@ export async function runAfterBuild(opts: NodePostbuildOptions = {}) {
     obeyRobots: opts.obeyRobots ?? true,
   })
 }
-

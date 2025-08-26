@@ -1,4 +1,4 @@
-import { glob } from 'globby'
+import { globby } from 'globby'
 import path from 'node:path'
 import fs from 'node:fs/promises'
 import type { AdapterContext, AdapterResult, FrameworkAdapter } from './index'
@@ -33,7 +33,7 @@ export const SvelteKitAdapter: FrameworkAdapter = {
   },
   async routes(ctx: AdapterContext): Promise<AdapterResult> {
     const dir = path.join(ctx.projectRoot, 'src/routes')
-    const files = await glob(['**/*', '!**/*.d.ts'], { cwd: dir, dot: false })
+    const files = await globby(['**/*', '!**/*.d.ts'], { cwd: dir, dot: false })
     const routes = new Set<string>()
     for (const f of files) {
       if (!/\+page\.|\.svelte$/.test(f)) continue

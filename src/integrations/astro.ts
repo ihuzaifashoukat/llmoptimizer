@@ -1,4 +1,4 @@
-// Lightweight Astro integration to write llm.txt after build
+// Lightweight Astro integration to write llms.txt after build
 // Usage in astro.config.mjs:
 //   import llm from 'llmoptimizer/astro'
 //   export default defineConfig({ integrations: [llm({ mode: 'static' })] })
@@ -22,7 +22,7 @@ export default function llmOptimizerAstro(opts: AstroOptions = {}): any {
     hooks: {
       'astro:build:done': async ({ dir }: { dir: URL }) => {
         const rootDir = fileURLToPath(dir)
-        const outFile = opts.outFile ?? `${rootDir}/llm.txt`
+      const outFile = opts.outFile ?? `${rootDir}/llms.txt`
         const format = opts.format ?? 'markdown'
         if (mode === 'static') {
           await generateFromStatic({ rootDir, outFile, format })
@@ -43,4 +43,3 @@ export default function llmOptimizerAstro(opts: AstroOptions = {}): any {
     },
   }
 }
-

@@ -1,0 +1,16 @@
+[
+  {
+    "name": "Docs",
+    "links": [
+      { "title": "Quickstart", "url": "https://example.com/docs/quickstart.md", "notes": "Get started fast" },
+      { "title": "API Reference", "url": "https://example.com/docs/api.md" }
+    ]
+  },
+  {
+    "name": "Guides",
+    "links": [
+      { "title": "Deployment Guide", "url": "https://example.com/docs/deployment.md" }
+    ]
+  }
+]
+

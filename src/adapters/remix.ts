@@ -1,4 +1,4 @@
-import { glob } from 'globby'
+import { globby } from 'globby'
 import path from 'node:path'
 import fs from 'node:fs/promises'
 import type { AdapterContext, AdapterResult, FrameworkAdapter } from './index'
@@ -41,7 +41,7 @@ export const RemixAdapter: FrameworkAdapter = {
     const routes = new Set<string>()
     for (const r of roots) {
       const dir = path.join(ctx.projectRoot, r)
-      const files = await glob(['**/*.{tsx,ts,jsx,js,md,mdx}'], { cwd: dir, dot: false })
+      const files = await globby(['**/*.{tsx,ts,jsx,js,md,mdx}'], { cwd: dir, dot: false })
       for (const f of files) {
         routes.add(remixFileToRoute(f))
       }

@@ -2,3 +2,8 @@ export { generate, generateFromUrl, generateFromSitemap, generateFromStatic, gen
 export { defineConfig, loadConfig, type LLMOptimizerConfig } from './lib/config'
 export type { PageExtract, SiteSummary, OutputFormat } from './lib/types'
 export { registerAdapter } from './adapters'
+export { generateRobotsTxt } from './lib/robots'
+export { llmOptimizer, type LLMOptimizerViteOptions } from './integrations/vite'
+export { runAfterNextBuild, type NextHelperOptions } from './integrations/next'
+export { docsLLMs, type DocsLLMsOptions } from './integrations/docs'
+export { autoPostbuild, type AutoOptions, type AutoResult } from './integrations/auto'

@@ -6,6 +6,7 @@ export interface CrawlOptions {
   baseUrl?: string
   maxPages: number
   concurrency: number
+  requestDelayMs?: number
   obeyRobots: boolean
   include?: string[]
   exclude?: string[]
@@ -24,6 +25,7 @@ export async function crawl(opts: CrawlOptions): Promise<FetchedPage[]> {
   const limit = pLimit(opts.concurrency)
 
   const visited = new Set<string>()
+  const enqueued = new Set<string>()
   const queue: string[] = []
   const out: FetchedPage[] = []
 
@@ -57,7 +59,18 @@ export async function crawl(opts: CrawlOptions): Promise<FetchedPage[]> {
   }
 
   for (const s of opts.startUrls) {
-    if (shouldVisit(s)) queue.push(s)
+    if (shouldVisit(s)) { queue.push(s); enqueued.add(s) }
+  }
+
+  let lastRequestAt = 0
+
+  async function throttle() {
+    const delay = opts.requestDelayMs || 0
+    if (!delay) return
+    const now = Date.now()
+    const wait = Math.max(0, lastRequestAt + delay - now)
+    if (wait) await new Promise((r) => setTimeout(r, wait))
+    lastRequestAt = Date.now()
   }
 
   while (queue.length && out.length < opts.maxPages) {
@@ -67,7 +80,8 @@ export async function crawl(opts: CrawlOptions): Promise<FetchedPage[]> {
         limit(async () => {
           visited.add(u)
           try {
-            const res = await fetcher(u, { headers: { 'user-agent': 'llmoptimizer/0.1 (+https://npmjs.com/llmoptimizer)' } })
+            await throttle()
+            const res = await fetcher(u, { headers: { 'user-agent': 'llmoptimizer/0.2 (+https://npmjs.com/llmoptimizer)' } })
             const ct = res.headers.get('content-type') ?? undefined
             const isHtml = ct?.includes('text/html')
             const html = isHtml ? await res.text() : undefined
@@ -76,7 +90,7 @@ export async function crawl(opts: CrawlOptions): Promise<FetchedPage[]> {
               // extract links to continue crawl (shallow breadth-first)
               for (const link of extractLinks(html, u)) {
                 if (out.length + queue.length >= opts.maxPages) break
-                if (shouldVisit(link)) queue.push(link)
+                if (shouldVisit(link) && !enqueued.has(link)) { queue.push(link); enqueued.add(link) }
               }
             }
             return item
@@ -106,7 +120,8 @@ function extractLinks(html: string, baseUrl: string): string[] {
       // ignore
     }
   }
-  return Array.from(new Set(urls))
+  // cap to avoid exploding queue
+  return Array.from(new Set(urls)).slice(0, 200)
 }
 
 async function loadRobots(origin: string, fetcher: typeof fetch) {

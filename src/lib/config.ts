@@ -7,6 +7,17 @@ export const ConfigSchema = z.object({
   obeyRobots: z.boolean().default(true).optional(),
   maxPages: z.number().default(100).optional(),
   concurrency: z.number().default(5).optional(),
+  network: z
+    .object({
+      delayMs: z.number().optional(),
+      sitemap: z
+        .object({
+          concurrency: z.number().optional(),
+          delayMs: z.number().optional(),
+        })
+        .optional(),
+    })
+    .optional(),
   include: z.array(z.string()).optional(),
   exclude: z.array(z.string()).optional(),
   params: z.record(z.array(z.string())).optional(),
@@ -18,6 +29,17 @@ export const ConfigSchema = z.object({
       dirs: z.array(z.string()).optional(),
     })
     .optional(),
+  robots: z
+    .object({
+      allowAll: z.boolean().optional(),
+      llmAllow: z.boolean().optional(),
+      llmBots: z.array(z.string()).optional(),
+      searchAllow: z.boolean().optional(),
+      searchBots: z.array(z.string()).optional(),
+      sitemaps: z.array(z.string()).optional(),
+      outFile: z.string().optional(),
+    })
+    .optional(),
   render: z
     .object({
       // Optional custom markdown renderer (only in TS/JS config files)
@@ -27,10 +49,10 @@ export const ConfigSchema = z.object({
     .optional(),
   output: z
     .object({
-      file: z.string().default('llm.txt').optional(),
+      file: z.string().default('llms.txt').optional(),
       format: z.enum(['markdown', 'json']).default('markdown').optional(),
     })
-    .default({ file: 'llm.txt', format: 'markdown' })
+    .default({ file: 'llms.txt', format: 'markdown' })
     .optional(),
 })
 

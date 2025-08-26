@@ -11,6 +11,8 @@ export interface FrameworkAdapter {
   name: string
   detect(ctx: AdapterContext): Promise<boolean> | boolean
   routes(ctx: AdapterContext): Promise<AdapterResult>
+  discoverParams?(ctx: AdapterContext): Promise<Record<string, string[]>> | Record<string, string[]>
+  discoverRouteParams?(ctx: AdapterContext): Promise<Record<string, Record<string, string[]>>> | Record<string, Record<string, string[]>>
 }
 
 const adapters: FrameworkAdapter[] = []
@@ -19,10 +21,14 @@ export function registerAdapter(a: FrameworkAdapter) {
   adapters.push(a)
 }
 
-export async function detectRoutes(projectRoot: string): Promise<AdapterResult | undefined> {
+export async function detectRoutes(projectRoot: string): Promise<AdapterResult & { params?: Record<string, string[]>; routeParams?: Record<string, Record<string, string[]>> } | undefined> {
   for (const a of adapters) {
     if (await a.detect({ projectRoot })) {
-      return a.routes({ projectRoot })
+      const ctx = { projectRoot }
+      const res = await a.routes(ctx)
+      const params = a.discoverParams ? await a.discoverParams(ctx) : undefined
+      const routeParams = a.discoverRouteParams ? await a.discoverRouteParams(ctx) : undefined
+      return { ...res, params, routeParams }
     }
   }
 }

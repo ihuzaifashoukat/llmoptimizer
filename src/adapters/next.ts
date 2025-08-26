@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { glob } from 'globby'
+import { globby } from 'globby'
 import type { AdapterContext, AdapterResult, FrameworkAdapter } from './index'
 
 export const NextAdapter: FrameworkAdapter = {
@@ -18,7 +18,7 @@ export const NextAdapter: FrameworkAdapter = {
     const routes = new Set<string>()
     for (const r of roots) {
       const dir = path.join(ctx.projectRoot, r)
-      const files = await glob(['**/*.{tsx,ts,jsx,js,mdx,md}'], { cwd: dir, dot: false })
+      const files = await globby(['**/*.{tsx,ts,jsx,js,mdx,md}'], { cwd: dir, dot: false })
       for (const f of files) {
         // exclude api routes in pages/api and app/api
         if (/^api\//.test(f)) continue
@@ -33,5 +33,19 @@ export const NextAdapter: FrameworkAdapter = {
       }
     }
     return { routes: Array.from(routes), buildDirs: ['out', '.next/server/pages', '.next/server/app'] }
+  },
+  async discoverRouteParams(ctx: AdapterContext) {
+    const slugSamples = new Set<string>(['welcome', 'hello-world'])
+    try {
+      const blogFiles = await globby(['content/blog/*.*', 'src/content/blog/*.*', 'pages/blog/*.*', 'src/pages/blog/*.*'], { cwd: ctx.projectRoot })
+      for (const f of blogFiles) {
+        const base = path.basename(f, path.extname(f))
+        if (base && base !== 'index') slugSamples.add(base)
+      }
+    } catch {}
+    const routeParams: Record<string, Record<string, string[]>> = {}
+    // Offer samples for any route pattern containing :slug
+    routeParams['/blog/:slug'] = { slug: Array.from(slugSamples) }
+    return routeParams
   },
 }

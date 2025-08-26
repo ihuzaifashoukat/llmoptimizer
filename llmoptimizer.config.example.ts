@@ -1,4 +1,4 @@
-import { defineConfig } from './src/lib/config'
+import { defineConfig } from 'llmoptimizer'
 
 export default defineConfig({
   // baseUrl: 'https://example.com',
@@ -12,8 +12,7 @@ export default defineConfig({
     // 'https://example.com/admin/*'
   ],
   output: {
-    file: 'llm.txt',
+    file: 'llms.txt',
     format: 'markdown',
   },
 })
-

@@ -22,13 +22,12 @@ export async function runAfterRemixBuild(opts: RemixOptions = {}) {
   const format = opts.format ?? 'markdown'
   if (mode === 'static') {
     const dir = opts.buildDir ?? 'public'
-    const outFile = opts.outFile ?? path.join(dir, 'llm.txt')
+    const outFile = opts.outFile ?? path.join(dir, 'llms.txt')
     // Ensure dir exists
     try { await fs.stat(dir) } catch { throw new Error(`Directory not found: ${dir}`) }
     return generateFromStatic({ rootDir: dir, outFile, format })
   }
   if (!opts.baseUrl) throw new Error('runAfterRemixBuild requires baseUrl in crawl mode')
-  const outFile = opts.outFile ?? 'public/llm.txt'
+  const outFile = opts.outFile ?? 'public/llms.txt'
   return generateFromUrl({ baseUrl: opts.baseUrl, outFile, format, maxPages: 200, concurrency: opts.concurrency ?? 8, obeyRobots: opts.obeyRobots ?? true })
 }
-

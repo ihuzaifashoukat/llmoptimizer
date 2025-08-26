@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { glob } from 'globby'
+import { globby } from 'globby'
 import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import type { AdapterContext, AdapterResult, FrameworkAdapter } from './index'
@@ -17,7 +17,7 @@ export const GatsbyAdapter: FrameworkAdapter = {
     const routes = new Set<string>()
     // 1) File-based routes in src/pages
     try {
-      const files = await glob(['**/*.{js,jsx,ts,tsx,md,mdx}'], { cwd: path.join(ctx.projectRoot, 'src/pages') })
+      const files = await globby(['**/*.{js,jsx,ts,tsx,md,mdx}'], { cwd: path.join(ctx.projectRoot, 'src/pages') })
       for (const f of files) {
         const noExt = f.replace(/\.(jsx?|tsx?|mdx?)$/i, '')
         const parts = noExt.split('/')
