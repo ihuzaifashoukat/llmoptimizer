@@ -5,48 +5,48 @@
   "license": "MIT",
   "type": "module",
   "main": "dist/index.cjs",
-  "module": "dist/index.mjs",
+  "module": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.mjs",
+      "import": "./dist/index.js",
       "require": "./dist/index.cjs"
     },
     "./cli": {
-      "import": "./dist/cli.mjs",
+      "import": "./dist/cli.js",
       "require": "./dist/cli.cjs"
     },
     "./vite": {
-      "import": "./dist/vite.mjs",
+      "import": "./dist/vite.js",
       "require": "./dist/vite.cjs"
     },
     "./next": {
-      "import": "./dist/next.mjs",
+      "import": "./dist/next.js",
       "require": "./dist/next.cjs"
     },
     "./astro": {
-      "import": "./dist/astro.mjs",
+      "import": "./dist/astro.js",
       "require": "./dist/astro.cjs"
     },
     "./nuxt": {
-      "import": "./dist/nuxt.mjs",
+      "import": "./dist/nuxt.js",
       "require": "./dist/nuxt.cjs"
     },
     "./remix": {
-      "import": "./dist/remix.mjs",
+      "import": "./dist/remix.js",
       "require": "./dist/remix.cjs"
     },
     "./node": {
-      "import": "./dist/node.mjs",
+      "import": "./dist/node.js",
       "require": "./dist/node.cjs"
     },
     "./auto": {
-      "import": "./dist/auto.mjs",
+      "import": "./dist/auto.js",
       "require": "./dist/auto.cjs"
     },
     "./docs": {
-      "import": "./dist/docs.mjs",
+      "import": "./dist/docs.js",
       "require": "./dist/docs.cjs"
     },
     "./package.json": "./package.json"

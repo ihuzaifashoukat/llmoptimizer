@@ -1,0 +1,42 @@
+name: Publish to npm
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch: {}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify CLI/package version match
+        run: >
+          node -e "const pkg=require('./package.json');
+          const fs=require('fs');
+          const s=fs.readFileSync('src/cli.ts','utf8');
+          const m=s.match(/\.version\('(.*?)'\)/);
+          if(!m) throw new Error('CLI version not found');
+          if(m[1]!==pkg.version) throw new Error(`Version mismatch: cli ${m[1]} vs pkg ${pkg.version}`);
+          console.log('Version OK:', m[1]);"
+
+      - name: Publish
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
