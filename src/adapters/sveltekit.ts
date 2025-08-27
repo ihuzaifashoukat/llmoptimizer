@@ -41,4 +41,39 @@ export const SvelteKitAdapter: FrameworkAdapter = {
     }
     return { routes: Array.from(routes), buildDirs: ['build'] }
   },
+  async discoverParams(ctx: AdapterContext) {
+    const params: Record<string, string[]> = {}
+    try {
+      const dir = path.join(ctx.projectRoot, 'src', 'routes')
+      const files = await globby(['**/*', '!**/*.d.ts'], { cwd: dir, dot: false })
+      const names = new Set<string>()
+      for (const f of files) {
+        const route = toRouteFromRoutesDir(f)
+        const mm = route.match(/:([A-Za-z0-9_]+)/g)
+        mm?.forEach((m) => names.add(m.slice(1)))
+      }
+      for (const n of names) {
+        if (n === 'slug') params[n] = ['welcome', 'hello-world']
+        else if (n === 'id') params[n] = ['1', '2', '42']
+        else params[n] = ['sample']
+      }
+    } catch {}
+    // Blog slugs
+    const slugSet = new Set<string>(['welcome', 'hello-world'])
+    try {
+      const blog = await globby(['src/routes/blog/*', 'src/routes/blog/**/+page.*'], { cwd: ctx.projectRoot })
+      for (const f of blog) {
+        const base = path.basename(f, path.extname(f))
+        if (base && base !== 'index' && !base.startsWith('+')) slugSet.add(base)
+      }
+    } catch {}
+    params['slug'] = Array.from(slugSet)
+    return params
+  },
+  async discoverRouteParams(ctx: AdapterContext) {
+    const routeParams: Record<string, Record<string, string[]>> = {}
+    const samples = await (this.discoverParams as any)(ctx).catch(() => ({}))
+    if (samples?.slug?.length) routeParams['/blog/:slug'] = { slug: samples.slug }
+    return routeParams
+  },
 }

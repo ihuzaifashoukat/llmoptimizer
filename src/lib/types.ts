@@ -32,3 +32,19 @@ export interface SiteSummary {
   pageCount: number
   locales?: string[]
 }
+
+// Options to tweak the structured markdown renderer
+export interface StructuredRenderOptions {
+  limits?: {
+    headings?: number
+    links?: number
+    images?: number
+  }
+  categories?: {
+    // Order of category sections in output
+    order?: string[]
+    // Keywords matched (in pathname or H1 text) to assign a category
+    // Example: { Products: ["product", "pricing"], Policies: ["privacy","terms"] }
+    keywords?: Record<string, string[]>
+  }
+}

@@ -7,7 +7,7 @@ type VitePlugin = {
 }
 import path from 'node:path'
 import fs from 'node:fs/promises'
-import { generateFromStatic, generateFromUrl } from '../lib/generate'
+import { generateFromStatic, generateFromUrl, generateFromBuild } from '../lib/generate'
 import { generateRobotsTxt, type RobotsOptions } from '../lib/robots'
 
 export interface LLMOptimizerViteOptions {
@@ -20,8 +20,9 @@ export interface LLMOptimizerViteOptions {
   requestDelayMs?: number
   include?: string[]
   exclude?: string[]
-  theme?: 'default' | 'compact' | 'detailed'
+  theme?: 'default' | 'compact' | 'detailed' | 'structured'
   robots?: boolean | (RobotsOptions & { outFile?: string })
+  log?: boolean
 }
 
 export function llmOptimizer(opts: LLMOptimizerViteOptions = {}): VitePlugin {
@@ -35,18 +36,52 @@ export function llmOptimizer(opts: LLMOptimizerViteOptions = {}): VitePlugin {
     async closeBundle() {
       const outFile = opts.outFile ?? `${outDir}/llms.txt`
       const format = opts.format ?? 'markdown'
+      let res: { pages: any[]; outFile: string } | undefined
       if ((opts.mode ?? 'static') === 'static') {
-        await generateFromStatic({
-          rootDir: outDir,
-          outFile,
-          format,
-          include: opts.include,
-          exclude: opts.exclude,
-          theme: opts.theme,
-        })
+        if (opts.baseUrl) {
+          // Prefer build-scan for absolute URL mapping and richer coverage
+          const projectRoot = process.cwd()
+          const rel = path.relative(projectRoot, outDir)
+          res = await generateFromBuild({
+            projectRoot,
+            outFile,
+            format,
+            dirs: [rel],
+            baseUrl: opts.baseUrl,
+            concurrency: opts.concurrency ?? 8,
+            obeyRobots: opts.obeyRobots ?? true,
+            include: opts.include,
+            exclude: opts.exclude,
+            theme: opts.theme,
+            log: Boolean(opts.log),
+          })
+          if (res.pages.length === 0) {
+            if (opts.log) console.warn('[llmoptimizer][vite] Build-scan found 0 pages; falling back to crawl mode.')
+            res = await generateFromUrl({
+              baseUrl: opts.baseUrl,
+              outFile,
+              format,
+              maxPages: 200,
+              concurrency: opts.concurrency ?? 8,
+              obeyRobots: opts.obeyRobots ?? true,
+              include: opts.include,
+              exclude: opts.exclude,
+              requestDelayMs: opts.requestDelayMs,
+            })
+          }
+        } else {
+          res = await generateFromStatic({
+            rootDir: outDir,
+            outFile,
+            format,
+            include: opts.include,
+            exclude: opts.exclude,
+            theme: opts.theme,
+          })
+        }
       } else {
         if (!opts.baseUrl) throw new Error('llmoptimizer vite plugin requires baseUrl in crawl mode')
-        await generateFromUrl({
+        res = await generateFromUrl({
           baseUrl: opts.baseUrl,
           outFile,
           format,
@@ -59,7 +94,7 @@ export function llmOptimizer(opts: LLMOptimizerViteOptions = {}): VitePlugin {
         })
       }
       // eslint-disable-next-line no-console
-      console.log(`[llmoptimizer] Wrote ${outFile}`)
+      console.log(`[llmoptimizer] Wrote ${outFile}${res ? ` (${res.pages.length} pages)` : ''}`)
 
       // Optionally write robots.txt alongside the build
       if (opts.robots) {

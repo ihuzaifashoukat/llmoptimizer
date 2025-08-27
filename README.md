@@ -76,6 +76,37 @@ Docs mode also emits:
 - `llms-stats.json`: Headings, words, token estimates per doc + totals
 - Optional: `llms-ctx.txt` and `llms-ctx-full.txt` context bundles
 
+### Structured theme
+
+Use `--theme structured` (or `render.theme: 'structured'` in config) for a more LLM-friendly, categorized Markdown output. It includes:
+
+- Site header with base URL, locales, page count, and totals.
+- Categories (Home, Docs, Guides, API, Blog, etc.) with counts and an index.
+- Per-page JSON metadata blocks (url/title/description/canonical/locale/metrics/alternates/OG/Twitter) followed by concise headings, links, and images samples.
+
+Example:
+
+# llms.txt — Structured Site Summary
+Base URL: https://example.com
+Generated: 2025-08-27
+Pages: 42
+Totals: words=12345 images=120 missingAlt=3 internalLinks=420 externalLinks=88
+
+## Categories
+- Docs: 20
+- Guides: 8
+- Blog: 5
+- Other: 9
+
+## Docs (20)
+### Getting Started
+```json
+{ "url": "https://example.com/docs/getting-started", "title": "Getting Started", "metrics": { "wordCount": 950 } }
+```
+- Headings:
+  - H1: Getting Started
+  - H2: Installation
+
 ---
 
 ## CLI Overview
@@ -95,13 +126,36 @@ npx llmoptimizer generate [options]
 # Output & format
   --out <file>                  # default: llms.txt
   --format markdown|json
-  --theme default|compact|detailed
+  --theme default|compact|detailed|structured   # default: structured
 
 # Filtering & perf
   --include <glob...> --exclude <glob...>
   --max-pages <n> --concurrency <n> --delay-ms <ms>
   --no-robots
 ```
+
+3) Debug dump (routes/build/sample)
+
+```
+npx llmoptimizer dump \
+  --project-root . \
+  --base-url https://example.com --sample 5 \
+  --scan-build --build-dirs dist .next/server/pages \
+  --framework-details \
+  --include "/docs/*" --exclude "/admin/*" \
+  --out dump.json
+```
+
+Outputs JSON including:
+- Adapter detection and basic routes/params
+- Next.js extractor details (when applicable)
+- Framework details (when `--framework-details`):
+  - SvelteKit: filesystem-derived route patterns + param names + example blog slugs
+  - Nuxt: pages/ routes (Nuxt 2 underscore + Nuxt 3 bracket), i18n locales (best-effort), content/blog slugs
+  - Remix: app/routes routes (dotted segments, $params, pathless parentheses), param names
+  - Angular: `angular.json` outputPath, extracted `path:` entries and `loadChildren` hints
+- Optional build scan results
+- Optional sample of fetched pages when `--base-url` is provided
 
 2) Docs (Markdown/MDX) → llms files
 
@@ -154,7 +208,7 @@ It allows popular LLM crawlers (e.g., GPTBot, Google‑Extended, Claude, Perplex
 
 ## Configuration (optional)
 
-Create `llmoptimizer.config.ts` if you prefer defaults on the CLI.
+Create `llmoptimizer.config.ts` if you prefer defaults on the CLI. Structured is the default theme.
 
 ```ts
 // llmoptimizer.config.ts
@@ -166,7 +220,25 @@ export default defineConfig({
   maxPages: 200,
   concurrency: 8,
   network: { delayMs: 100, sitemap: { concurrency: 6, delayMs: 50 } },
-  render: { theme: 'default' },
+  // Themes: 'default' | 'compact' | 'detailed' | 'structured'
+  render: {
+    theme: 'structured',
+    // Optional: customize structured output
+    structured: {
+      limits: { headings: 16, links: 12, images: 8 },
+      categories: {
+        // Control section order
+        order: ['Home', 'Products', 'Product Categories', 'Docs', 'Guides', 'API', 'Policies', 'Important', 'Blog', 'Company', 'Legal', 'Support', 'Examples', 'Other'],
+        // Keyword mapping: match in URL path or H1
+        keywords: {
+          Products: ['product', 'pricing', 'features'],
+          'Product Categories': ['category', 'categories', 'catalog', 'collection'],
+          Policies: ['privacy', 'terms', 'cookies', 'policy', 'policies', 'security', 'gdpr'],
+          Important: ['status', 'uptime', 'login', 'signup', 'contact'],
+        },
+      },
+    },
+  },
   output: { file: 'public/llms.txt', format: 'markdown' },
   robots: {
     outFile: 'public/robots.txt',
@@ -206,10 +278,15 @@ All integrations default to writing llms.txt. You can swap to JSON via `format: 
   import { runAfterNextBuild } from 'llmoptimizer/next'
   await runAfterNextBuild({
     projectRoot: process.cwd(),
-    baseUrl: 'https://yourdomain.com',
+    baseUrl: process.env.NEXT_PUBLIC_SITE_URL || 'https://yourdomain.com',
     outFile: 'public/llms.txt',
-    mode: 'adapter', // 'static' with staticDir or 'crawl'
+    // Choose the strategy:
+    // - static: build-scan (.next/server/*, out) with baseUrl mapping → adapter → crawl
+    // - adapter: fetch detected routes from baseUrl → build-scan → crawl
+    // - crawl: breadth-first crawl baseUrl
+    mode: 'static',
     robots: true,
+    log: true,
   })
   // package.json
   // { "scripts": { "postbuild": "node scripts/postbuild-llm.ts" } }
@@ -219,9 +296,16 @@ All integrations default to writing llms.txt. You can swap to JSON via `format: 
   ```ts
   // nuxt.config.ts
   export default defineNuxtConfig({
-    modules: [['llmoptimizer/nuxt', { mode: 'static' }]],
+    modules: [[
+      'llmoptimizer/nuxt',
+      {
+        // static: build-scan on .output/public with baseUrl mapping → crawl fallback
+        mode: 'static',
+        baseUrl: process.env.NUXT_PUBLIC_SITE_URL || 'https://yourdomain.com',
+        robots: true,
+      },
+    ]],
   })
-  // For crawl mode, add { baseUrl: 'https://yourdomain.com' }
   ```
 
 - Astro
@@ -229,14 +313,77 @@ All integrations default to writing llms.txt. You can swap to JSON via `format: 
   // astro.config.mjs
   import { defineConfig } from 'astro/config'
   import llm from 'llmoptimizer/astro'
-  export default defineConfig({ integrations: [llm({ mode: 'static' })] })
+  export default defineConfig({
+    integrations: [
+      llm({
+        // static: build-scan on dist with baseUrl mapping → crawl fallback
+        mode: 'static',
+        baseUrl: process.env.SITE_URL,
+        robots: true,
+      })
+    ]
+  })
   ```
 
 - Remix
   ```ts
   // scripts/postbuild-llm.mjs
   import { runAfterRemixBuild } from 'llmoptimizer/remix'
-  await runAfterRemixBuild({ mode: 'crawl', baseUrl: 'https://your.app', outFile: 'public/llms.txt' })
+  await runAfterRemixBuild({
+    // static: build-scan on public with baseUrl mapping → crawl fallback
+    mode: 'static',
+    baseUrl: process.env.SITE_URL || 'https://your.app',
+    outFile: 'public/llms.txt',
+    robots: true,
+  })
+  ```
+
+- SvelteKit
+  ```ts
+  // scripts/sveltekit-postbuild-llm.mjs
+  import { runAfterSvelteKitBuild } from 'llmoptimizer/sveltekit'
+  await runAfterSvelteKitBuild({
+    // static: scan 'build' and map to URLs using baseUrl → crawl fallback if SSR-only
+    mode: 'static',
+    buildDir: 'build',
+    baseUrl: process.env.SITE_URL || 'https://your.app',
+    outFile: 'build/llms.txt',
+    theme: 'structured',
+    // Optional filters and structured theme options
+    // include: ['/docs/*'], exclude: ['/admin/*'],
+    // renderOptions: { limits: { headings: 12, links: 10, images: 6 } },
+    robots: { outFile: 'build/robots.txt' },
+  })
+  // package.json → { "scripts": { "postbuild": "node scripts/sveltekit-postbuild-llm.mjs" } }
+  ```
+
+- Angular
+  ```ts
+  // scripts/angular-postbuild-llm.mjs
+  import { runAfterAngularBuild } from 'llmoptimizer/angular'
+  await runAfterAngularBuild({
+    // static: scan Angular dist output; distDir auto-detected from angular.json when omitted
+    mode: 'static',
+    baseUrl: process.env.SITE_URL || 'https://your.app',
+    theme: 'structured',
+    // Optional: distDir: 'dist/your-project/browser'
+    // include/exclude and renderOptions are supported
+    robots: { outFile: 'dist/robots.txt' },
+  })
+  // package.json → { "scripts": { "postbuild": "node scripts/angular-postbuild-llm.mjs" } }
+  ```
+
+- Generic Node script
+  ```ts
+  // scripts/postbuild-llm.ts
+  import { runAfterBuild } from 'llmoptimizer/node'
+  await runAfterBuild({
+    // static: build-scan on dist with baseUrl mapping → crawl fallback
+    mode: 'static',
+    rootDir: 'dist',
+    baseUrl: process.env.SITE_URL,
+    robots: true,
+  })
   ```
 
 - Generic Node/SSR
@@ -300,6 +447,22 @@ console.log(res) // { mode: 'docs'|'build'|'adapter'|'crawl', outPath: '...' }
 ```
 
 Add to package.json: `{ "scripts": { "postbuild": "node scripts/auto-llm.mjs" } }`.
+
+Notes
+- Absolute links: Internal links, canonical, hreflang, and images are resolved to absolute URLs using the page URL. Pass `baseUrl` in static/build-scan modes to avoid file:// URLs.
+- Build-scan coverage: When `baseUrl` is provided, build-scan enriches routes using framework artifacts (e.g., Next prerender/routes manifests) and falls back to sitemap or crawl if empty.
+- Adapter vs static: Adapter fetches via HTTP from `baseUrl` (requires a reachable server). Static uses build output folders and does not require a running server.
+
+Examples
+- Next postbuild: `examples/next-postbuild-llm.mjs`
+- Auto detection: `examples/auto-llm.mjs`
+- Nuxt config: `examples/nuxt.config.ts`
+- Astro config: `examples/astro.config.mjs`
+- Remix postbuild: `examples/remix-postbuild-llm.mjs`
+- Vite config: `examples/vite.config.mjs`
+- Generic Node postbuild: `examples/node-postbuild-llm.mjs`
+ - SvelteKit postbuild: `examples/sveltekit-postbuild-llm.mjs`
+ - Angular postbuild: `examples/angular-postbuild-llm.mjs`
 
 ---
 

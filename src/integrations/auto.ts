@@ -67,7 +67,18 @@ export async function autoPostbuild(opts: AutoOptions = {}): Promise<AutoResult>
   if (foundDir) {
     // If a single build directory clearly exists, use static scan there
     const outFile = opts.outFile ?? path.join(foundDir, 'llms.txt')
-    const res = await generateFromStatic({ rootDir: foundDir, outFile, format })
+    const res = await generateFromBuild({
+      projectRoot: root,
+      outFile,
+      format,
+      dirs: [path.relative(root, foundDir)],
+      baseUrl,
+      concurrency,
+      obeyRobots,
+      maxPages: opts.maxPages ?? 200,
+      requestDelayMs: opts.requestDelayMs,
+      log: Boolean(opts.log),
+    })
     if (opts.log) console.log(`[llmoptimizer][auto] build (static) → ${res.outFile} (${res.pages.length})`)
     return { mode: 'build', outPath: res.outFile, pages: res.pages.length }
   }
@@ -93,7 +104,7 @@ export async function autoPostbuild(opts: AutoOptions = {}): Promise<AutoResult>
   }
 
   // If nothing matched and no baseUrl provided, do a broad build scan
-  const res = await generateFromBuild({ projectRoot: root, outFile: path.join(root, opts.outFile ?? 'llms.txt'), format })
+  const res = await generateFromBuild({ projectRoot: root, outFile: path.join(root, opts.outFile ?? 'llms.txt'), format, baseUrl, concurrency, obeyRobots, maxPages: opts.maxPages ?? 200, requestDelayMs: opts.requestDelayMs, log: Boolean(opts.log) })
   if (opts.log) console.log(`[llmoptimizer][auto] build-scan → ${res.outFile} (${res.pages.length})`)
   return { mode: 'build', outPath: res.outFile, pages: res.pages.length }
 }

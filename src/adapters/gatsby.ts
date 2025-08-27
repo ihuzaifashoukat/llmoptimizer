@@ -85,7 +85,34 @@ async function loadGatsbyNode(root: string): Promise<any> {
       // continue
     }
   }
-  // try TS only if a transpiled JS exists; otherwise skip
+  // Optional TS support (opt-in): try ts-node or esbuild when env enabled
+  try {
+    const enableTs = String(process.env.LLMOPTIMIZER_GATSBY_TS || '').toLowerCase() === '1' || String(process.env.LLMOPTIMIZER_GATSBY_TS || '').toLowerCase() === 'true'
+    if (!enableTs) return undefined
+    const tsFile = path.join(root, 'gatsby-node.ts')
+    const st = await fs.stat(tsFile).catch(() => undefined)
+    if (!st || !st.isFile()) return undefined
+    // Attempt ts-node
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      require('ts-node/register/transpile-only')
+      const req = createRequire(tsFile)
+      return req(tsFile)
+    } catch {}
+    // Fallback: esbuild transpile to CJS temp file
+    try {
+      const { transform } = await import('esbuild')
+      const src = await fs.readFile(tsFile, 'utf8')
+      const out = await transform(src, { loader: 'ts', format: 'cjs', sourcemap: 'inline' })
+      const tmp = path.join(require('os').tmpdir(), 'llmopt-gatsby-node-' + Date.now() + '.cjs')
+      await fs.writeFile(tmp, out.code)
+      const req = createRequire(tmp)
+      const mod = req(tmp)
+      // best effort cleanup
+      fs.unlink(tmp).catch(() => {})
+      return mod
+    } catch {}
+  } catch {}
   return undefined
 }
 

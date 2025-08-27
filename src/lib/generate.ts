@@ -4,7 +4,7 @@ import { crawl } from './crawler'
 import { extractFromHtml } from './extractor'
 import { toMarkdown, renderMarkdown } from './markdown'
 import { parseSitemapUrls } from './sitemap'
-import type { OutputFormat, PageExtract, SiteSummary } from './types'
+import type { OutputFormat, PageExtract, SiteSummary, StructuredRenderOptions } from './types'
 import { globby } from 'globby'
 import { detectRoutes } from '../adapters'
 
@@ -14,7 +14,8 @@ export interface GenerateCommonOptions {
   include?: string[]
   exclude?: string[]
   toMarkdownFn?: (site: SiteSummary, pages: PageExtract[]) => string
-  theme?: 'default' | 'compact' | 'detailed'
+  theme?: 'default' | 'compact' | 'detailed' | 'structured'
+  renderOptions?: StructuredRenderOptions
 }
 
 export async function generateFromUrl(opts: {
@@ -41,6 +42,7 @@ export async function generateFromUrl(opts: {
     format: opts.format,
     site: { baseUrl: opts.baseUrl, generatedAt: new Date().toISOString(), pageCount: pages.length, locales: localesFrom(pages) },
     toMarkdownFn: opts.toMarkdownFn,
+    renderOptions: opts.renderOptions,
   })
 }
 
@@ -70,6 +72,7 @@ export async function generateFromSitemap(opts: {
     format: opts.format,
     site: { baseUrl: opts.baseUrl, generatedAt: new Date().toISOString(), pageCount: pages.length, locales: localesFrom(pages) },
     toMarkdownFn: opts.toMarkdownFn,
+    renderOptions: opts.renderOptions,
   })
 }
 
@@ -78,6 +81,10 @@ export async function generateFromStatic(opts: { rootDir: string } & GenerateCom
   const files = await globby(['**/*.html', '**/*.htm'], { cwd: root, ignore: ['node_modules/**'] })
   const pages: PageExtract[] = []
   for (const rel of files) {
+    const routePath = toRoutePath(rel)
+    const matches = (pat: string) => matchSimple(pat, routePath) || matchSimple(pat, rel.replace(/\\/g, '/'))
+    if (opts.include && !opts.include.some(matches)) continue
+    if (opts.exclude && opts.exclude.some(matches)) continue
     const abs = path.join(root, rel)
     const html = await fs.readFile(abs, 'utf8')
     const fakeUrl = 'file://' + abs
@@ -92,6 +99,7 @@ export async function generateFromStatic(opts: { rootDir: string } & GenerateCom
     site: { baseUrl: undefined, generatedAt: new Date().toISOString(), pageCount: pages.length, locales: localesFrom(pages) },
     toMarkdownFn: opts.toMarkdownFn,
     theme: opts.theme,
+    renderOptions: opts.renderOptions,
   })
 }
 
@@ -112,13 +120,13 @@ function extractAll(items: { url: string; status: number; html?: string }[]): Pa
     .map((p) => extractFromHtml(p.url, p.html!))
 }
 
-async function writeOutput({ pages, outFile, format, site, toMarkdownFn, theme }: { pages: PageExtract[]; outFile: string; format: OutputFormat; site: SiteSummary; toMarkdownFn?: (site: SiteSummary, pages: PageExtract[]) => string; theme?: 'default' | 'compact' | 'detailed' }) {
+async function writeOutput({ pages, outFile, format, site, toMarkdownFn, theme, renderOptions }: { pages: PageExtract[]; outFile: string; format: OutputFormat; site: SiteSummary; toMarkdownFn?: (site: SiteSummary, pages: PageExtract[]) => string; theme?: 'default' | 'compact' | 'detailed' | 'structured'; renderOptions?: StructuredRenderOptions }) {
   await fs.mkdir(path.dirname(path.resolve(outFile)), { recursive: true })
   if (format === 'json') {
     const json = JSON.stringify({ site, pages }, null, 2)
     await fs.writeFile(outFile, json)
   } else {
-    const md = toMarkdownFn ? toMarkdownFn(site, pages) : renderMarkdown(site, pages, theme ?? 'default')
+    const md = toMarkdownFn ? toMarkdownFn(site, pages) : renderMarkdown(site, pages, theme ?? 'structured', renderOptions)
     await fs.writeFile(outFile, md)
   }
   return { outFile, pages, site }
@@ -179,32 +187,50 @@ export async function generateFromBuild(opts: {
   toMarkdownFn?: (site: SiteSummary, pages: PageExtract[]) => string
   include?: string[]
   exclude?: string[]
-  theme?: 'default' | 'compact' | 'detailed'
+  theme?: 'default' | 'compact' | 'detailed' | 'structured'
+  baseUrl?: string
+  concurrency?: number
+  obeyRobots?: boolean
+  requestDelayMs?: number
+  maxPages?: number
+  log?: boolean
+  renderOptions?: StructuredRenderOptions
 }) {
   const root = path.resolve(opts.projectRoot ?? process.cwd())
   let candidates = opts.dirs ?? []
+  let detected: Awaited<ReturnType<typeof detectRoutes>> | undefined
   if (!candidates.length) {
     try {
-      const detected = await detectRoutes(root)
+      detected = await detectRoutes(root)
       if (detected?.buildDirs?.length) candidates.push(...detected.buildDirs)
     } catch {}
   }
-  if (!candidates.length) candidates = ['dist', 'build', 'out', '.output/public', '.next/server/pages', '.next/server/app', 'public']
+  if (!candidates.length) candidates = [
+    'dist', 'build', 'out', 'public',
+    '.next/server/pages', '.next/server/app', '.next/export',
+    '.output/public',
+    'build',
+    'public',
+    'dist', 'dist/*/browser',
+  ]
   const pages: PageExtract[] = []
+  const scanned: string[] = []
   for (const dir of candidates) {
     const absDir = path.join(root, dir)
     try {
       const stat = await fs.stat(absDir)
       if (!stat.isDirectory()) continue
+      scanned.push(dir)
       const files = await globby(['**/*.html', '**/*.htm'], { cwd: absDir, ignore: ['node_modules/**'] })
       for (const rel of files) {
         const routePath = toRoutePath(rel)
-        if (opts.include && !opts.include.some((p) => matchSimple(p, routePath))) continue
-        if (opts.exclude && opts.exclude.some((p) => matchSimple(p, routePath))) continue
+        const matches = (pat: string) => matchSimple(pat, routePath) || matchSimple(pat, rel.replace(/\\/g, '/'))
+        if (opts.include && !opts.include.some(matches)) continue
+        if (opts.exclude && opts.exclude.some(matches)) continue
         const abs = path.join(absDir, rel)
         const html = await fs.readFile(abs, 'utf8')
-        const fakeUrl = 'file://' + abs
-        const pe = extractFromHtml(fakeUrl, html)
+        const url = opts.baseUrl ? new URL(routePath, opts.baseUrl).toString() : ('file://' + abs)
+        const pe = extractFromHtml(url, html)
         try { const st = await fs.stat(abs); pe.lastModified = st.mtime.toISOString() } catch {}
         pages.push(pe)
       }
@@ -212,13 +238,156 @@ export async function generateFromBuild(opts: {
       // ignore missing
     }
   }
+  // dedupe by URL when multiple dirs scanned
+  if (pages.length > 1) {
+    const byUrl = new Map<string, PageExtract>()
+    for (const p of pages) if (!byUrl.has(p.url)) byUrl.set(p.url, p)
+    pages.length = 0
+    pages.push(...byUrl.values())
+  }
+
+  // Enrich from framework manifests when baseUrl is provided (Next.js, Gatsby)
+  if (opts.baseUrl) {
+    try {
+      const seeds = new Set<string>()
+      // Next.js prerender manifest
+      try {
+        const pre = JSON.parse(await fs.readFile(path.join(root, '.next', 'prerender-manifest.json'), 'utf8'))
+        if (pre && pre.routes && typeof pre.routes === 'object') {
+          for (const r of Object.keys(pre.routes)) {
+            if (r && r.startsWith('/')) seeds.add(r)
+          }
+        }
+        if (Array.isArray(pre?.notFoundRoutes)) {
+          for (const r of pre.notFoundRoutes) if (typeof r === 'string' && r.startsWith('/')) seeds.add(r)
+        }
+        // Expand dynamic routes with sample params when possible
+        if (pre && pre.dynamicRoutes && typeof pre.dynamicRoutes === 'object') {
+          const dyn = Object.keys(pre.dynamicRoutes)
+          if (dyn.length) {
+            const paramPatterns = dyn.map((r: string) => r.replace(/\[\.\.\.(.+?)\]/g, ':$1*').replace(/\[(.+?)\]/g, ':$1'))
+            const expanded = expandRoutesWithParams(paramPatterns, detected?.params, undefined, detected?.routeParams)
+            expanded.forEach((e) => { if (e && e.startsWith('/')) seeds.add(e) })
+          }
+        }
+      } catch {}
+      // Next.js routes manifest staticRoutes
+      try {
+        const routes = JSON.parse(await fs.readFile(path.join(root, '.next', 'routes-manifest.json'), 'utf8'))
+        const statics = routes?.staticRoutes as Array<{ page?: string; regex?: string }>
+        if (Array.isArray(statics)) {
+          for (const s of statics) {
+            const p = s.page
+            if (typeof p === 'string' && p.startsWith('/')) seeds.add(p === '/index' ? '/' : p)
+          }
+        }
+      } catch {}
+      // Gatsby page-data
+      try {
+        const pd = await globby(['public/page-data/**/page-data.json'], { cwd: root })
+        for (const rel of pd) {
+          const segs = rel.replace(/^public\/page-data\//, '').replace(/\/page-data.json$/, '')
+          let route = '/' + segs.replace(/\/index$/, '')
+          if (route.endsWith('/')) route = route.slice(0, -1) || '/'
+          if (route) seeds.add(route)
+        }
+      } catch {}
+
+      // Fetch seeds not already in pages
+      if (seeds.size) {
+        const existing = new Set(pages.map((p) => p.url))
+        const urls: string[] = []
+        for (const r of seeds) {
+          const routePath = r
+          const matches = (pat: string) => matchSimple(pat, routePath)
+          if (opts.include && !opts.include.some(matches)) continue
+          if (opts.exclude && opts.exclude.some(matches)) continue
+          const u = new URL(r, opts.baseUrl).toString()
+          if (!existing.has(u)) urls.push(u)
+        }
+        if (urls.length) {
+          const fetched = await fetchUrls(urls, { concurrency: opts.concurrency ?? 8, obeyRobots: opts.obeyRobots ?? true })
+          if (fetched.length) {
+            pages.push(...fetched)
+          }
+        }
+      }
+    } catch {}
+  }
+
+  if (!pages.length && opts.baseUrl) {
+    if (opts.log) console.warn('[llmoptimizer][build-scan] No HTML found. Trying sitemap/crawl fallback…')
+    // Attempt to find a local sitemap.xml and crawl its URLs
+    try {
+      const sitemapFiles = await globby(['sitemap*.xml'], { cwd: root, absolute: true })
+      let seeds: string[] = []
+      for (const f of sitemapFiles) {
+        try {
+          const xml = await fs.readFile(f, 'utf8')
+          let urls = await parseSitemapUrls(xml)
+          const origin = new URL(opts.baseUrl).origin
+          urls = urls.map((u) => new URL(u, origin).toString()).filter((u) => new URL(u).origin === origin)
+          seeds.push(...urls)
+        } catch {}
+      }
+      seeds = Array.from(new Set(seeds)).slice(0, Math.max(1, opts.maxPages ?? 200))
+      if (seeds.length) {
+        const crawlRes = await crawl({
+          startUrls: seeds,
+          baseUrl: opts.baseUrl,
+          maxPages: opts.maxPages ?? 200,
+          concurrency: opts.concurrency ?? 8,
+          requestDelayMs: opts.requestDelayMs,
+          obeyRobots: opts.obeyRobots ?? true,
+          include: opts.include,
+          exclude: opts.exclude,
+        })
+        const crawled = extractAll(crawlRes)
+        if (crawled.length) {
+          return writeOutput({
+            pages: crawled,
+            outFile: opts.outFile,
+            format: opts.format,
+            site: { baseUrl: opts.baseUrl, generatedAt: new Date().toISOString(), pageCount: crawled.length, locales: localesFrom(crawled) },
+            toMarkdownFn: opts.toMarkdownFn,
+            theme: opts.theme,
+            renderOptions: opts.renderOptions,
+          })
+        }
+      }
+    } catch {}
+    // Final fallback: small crawl from baseUrl
+    try {
+      const r = await generateFromUrl({
+        baseUrl: opts.baseUrl,
+        maxPages: opts.maxPages ?? 200,
+        concurrency: opts.concurrency ?? 8,
+        obeyRobots: opts.obeyRobots ?? true,
+        requestDelayMs: opts.requestDelayMs,
+        outFile: opts.outFile,
+        format: opts.format,
+        include: opts.include,
+        exclude: opts.exclude,
+        toMarkdownFn: opts.toMarkdownFn,
+        theme: opts.theme,
+        renderOptions: opts.renderOptions,
+      })
+      return r
+    } catch {}
+  }
+
+  if (opts.log) {
+    // eslint-disable-next-line no-console
+    console.log(`[llmoptimizer][build-scan] scanned: ${scanned.join(', ') || '(none)'} → pages=${pages.length}`)
+  }
   return writeOutput({
     pages,
     outFile: opts.outFile,
     format: opts.format,
-    site: { baseUrl: undefined, generatedAt: new Date().toISOString(), pageCount: pages.length, locales: localesFrom(pages) },
+    site: { baseUrl: opts.baseUrl, generatedAt: new Date().toISOString(), pageCount: pages.length, locales: localesFrom(pages) },
     toMarkdownFn: opts.toMarkdownFn,
     theme: opts.theme,
+    renderOptions: opts.renderOptions,
   })
 }
 
@@ -240,6 +409,41 @@ function escapeRegExp(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+async function fetchUrls(urls: string[], opts: { concurrency: number; obeyRobots: boolean }): Promise<PageExtract[]> {
+  const pages: PageExtract[] = []
+  const robots = opts.obeyRobots ? await loadRobotsForList(urls) : undefined
+  let i = 0
+  const pool = new Array(Math.max(1, opts.concurrency)).fill(0)
+  async function next() {
+    while (i < urls.length) {
+      const idx = i++
+      const u = urls[idx]
+      try {
+        if (robots && !robotsAllowedUrl(robots, u)) continue
+        const res = await fetch(u)
+        const ct = res.headers.get('content-type') || ''
+        if (res.ok && ct.includes('text/html')) {
+          const html = await res.text()
+          pages.push(extractFromHtml(u, html))
+        }
+      } catch {}
+    }
+  }
+  await Promise.all(pool.map(() => next()))
+  return pages
+}
+
+async function loadRobotsForList(urls: string[]) {
+  try {
+    const u0 = new URL(urls[0])
+    const origin = u0.origin
+    const res = await fetch(origin.replace(/\/$/, '') + '/robots.txt')
+    if (!res.ok) return undefined
+    const txt = await res.text()
+    return parseRobotsTxt(txt)
+  } catch { return undefined }
+}
+
 export async function generateFromAdapter(opts: {
   projectRoot: string
   baseUrl: string
@@ -254,7 +458,8 @@ export async function generateFromAdapter(opts: {
   paramSamplesFn?: (name: string) => string[]
   routeParamsMap?: Record<string, Record<string, string[]>>
   explicitRoutes?: string[]
-  theme?: 'default' | 'compact' | 'detailed'
+  theme?: 'default' | 'compact' | 'detailed' | 'structured'
+  renderOptions?: StructuredRenderOptions
 }) {
   const detected = await detectRoutes(opts.projectRoot)
   const routes = detected?.routes ?? []
@@ -273,6 +478,8 @@ export async function generateFromAdapter(opts: {
       include: opts.include,
       exclude: opts.exclude,
       toMarkdownFn: opts.toMarkdownFn,
+      theme: opts.theme,
+      renderOptions: opts.renderOptions,
     })
   }
 
@@ -301,6 +508,27 @@ export async function generateFromAdapter(opts: {
   }
   for (let k = 0; k < pool.length; k++) limiter.push(next())
   await Promise.all(limiter)
+  if (pages.length === 0) {
+    // Fallback: try a crawl from baseUrl to avoid empty outputs in adapter mode
+    try {
+      const r = await generateFromUrl({
+        baseUrl: opts.baseUrl,
+        maxPages: 100,
+        concurrency: opts.concurrency,
+        obeyRobots: opts.obeyRobots,
+        outFile: opts.outFile,
+        format: opts.format,
+        include: opts.include,
+        exclude: opts.exclude,
+        toMarkdownFn: opts.toMarkdownFn,
+        theme: opts.theme,
+        renderOptions: opts.renderOptions,
+      })
+      return r
+    } catch {
+      // continue to write empty summary below
+    }
+  }
   return writeOutput({
     pages,
     outFile: opts.outFile,
@@ -308,6 +536,7 @@ export async function generateFromAdapter(opts: {
     site: { baseUrl: opts.baseUrl, generatedAt: new Date().toISOString(), pageCount: pages.length, locales: localesFrom(pages) },
     toMarkdownFn: opts.toMarkdownFn,
     theme: opts.theme,
+    renderOptions: opts.renderOptions,
   })
 }
 

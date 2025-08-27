@@ -6,7 +6,11 @@ export function extractFromHtml(url: string, html: string): PageExtract {
 
   const title = $('head > title').first().text().trim() || undefined
   const description = $('meta[name="description"]').attr('content') || undefined
-  const canonical = $('link[rel="canonical"]').attr('href') || undefined
+  // Resolve canonical/hreflang URLs to absolute using page base
+  let canonical = $('link[rel="canonical"]').attr('href') || undefined
+  if (canonical) {
+    try { canonical = new URL(canonical, url).toString() } catch {}
+  }
   const locale = $('html').attr('lang') || $('meta[http-equiv="content-language"]').attr('content') || undefined
   const dir = $('html').attr('dir') || undefined
   const robotsMeta = $('meta[name="robots"]').attr('content') || undefined
@@ -35,8 +39,11 @@ export function extractFromHtml(url: string, html: string): PageExtract {
   const hreflang: { lang: string; href: string }[] = []
   $('link[rel="alternate"][hreflang]').each((_, el) => {
     const lang = $(el).attr('hreflang')
-    const href = $(el).attr('href')
-    if (lang && href) hreflang.push({ lang, href })
+    let href = $(el).attr('href') || undefined
+    if (lang && href) {
+      try { href = new URL(href, url).toString() } catch {}
+      if (href) hreflang.push({ lang, href })
+    }
   })
 
   const headings: { tag: string; text: string }[] = []
@@ -49,11 +56,18 @@ export function extractFromHtml(url: string, html: string): PageExtract {
 
   const links: { text: string; href: string; rel?: string }[] = []
   $('a[href]').each((_, el) => {
-    const href = $(el).attr('href')!
+    const raw = $(el).attr('href')!
     const text = $(el).text().replace(/\s+/g, ' ').trim()
     const rel = $(el).attr('rel') || undefined
-    if (href && /^https?:|\//.test(href)) {
-      links.push({ text, href, rel })
+    if (!raw) return
+    // skip anchors, javascript:, mailto:, tel:, data: and non-http(s)
+    if (/^(#|javascript:|mailto:|tel:|data:)/i.test(raw)) return
+    // Resolve against page URL
+    try {
+      const abs = new URL(raw, url).toString()
+      if (/^https?:/i.test(abs)) links.push({ text, href: abs, rel })
+    } catch {
+      // ignore invalid
     }
   })
   // internal vs external counts (relative or same-origin heuristic uses base of the page URL)
@@ -62,7 +76,7 @@ export function extractFromHtml(url: string, html: string): PageExtract {
   try {
     const base = new URL(url)
     for (const l of links) {
-      const u = new URL(l.href, base)
+      const u = new URL(l.href)
       if (u.origin === base.origin) internalLinks++
       else externalLinks++
     }
@@ -116,10 +130,16 @@ export function extractFromHtml(url: string, html: string): PageExtract {
   const images: { src: string; alt?: string }[] = []
   let missingAlt = 0
   $('img[src]').each((_, el) => {
-    const src = $(el).attr('src') || ''
+    const raw = $(el).attr('src') || ''
     const alt = $(el).attr('alt') || undefined
     if (!alt) missingAlt++
-    if (src) images.push({ src, alt })
+    if (!raw) return
+    try {
+      const abs = new URL(raw, url).toString()
+      if (/^https?:/i.test(abs)) images.push({ src: abs, alt })
+    } catch {
+      // ignore
+    }
   })
 
   return {

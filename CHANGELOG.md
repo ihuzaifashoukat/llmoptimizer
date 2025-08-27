@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is inspired by Keep a Changelog, and this project adheres to Semantic Versioning when possible.
 
+## [1.1.0] - 2025-08-27
+
+Added
+- CLI `dump` enhancements with new flags: `--base-url`, `--sample`, `--scan-build`, `--build-dirs`, `--include`, `--exclude`, `--framework-details`.
+- Sampling from live sites and scanning build directories to extract pages and titles.
+- Framework insights in `dump` for SvelteKit, Angular, Nuxt, and Remix (routes/manifests and param hints).
+- New examples: `examples/sveltekit-postbuild-llm.mjs`, `examples/angular-postbuild-llm.mjs`.
+- README snippets for SvelteKit/Angular helpers and a “Debug dump” section.
+- Package exports for `./sveltekit` and `./angular` plus build config updates.
+
+Changed
+- SvelteKit and Angular integrations more robust: support `include`/`exclude` and `renderOptions` passthrough; SvelteKit falls back from build-scan to crawl when needed; Angular auto-detects `distDir` via `angular.json`.
+- Example config modernized with structured theme defaults, network controls, route params/samples, `buildScan.dirs`, and robots options.
+
+Fixed
+- Resolved DTS error in `dump` by inlining a local helper and typings.
+
 ## [1.0.0] - 2025-08-26
 
 Added
@@ -45,5 +62,6 @@ Initial release with core generator:
 
 ---
 
-[1.0.0]: https://github.com/your-org/llmoptimizer/releases/tag/v1.0.0
-[0.1.0]: https://github.com/your-org/llmoptimizer/releases/tag/v0.1.0
+[1.0.0]: https://github.com/ihuzaifashoukat/llmoptimizer/releases/tag/v1.0.0
+[0.1.0]: https://github.com/ihuzaifashoukat/llmoptimizer/releases/tag/v0.1.0
+[1.1.0]: https://github.com/ihuzaifashoukat/llmoptimizer/releases/tag/v1.1.0

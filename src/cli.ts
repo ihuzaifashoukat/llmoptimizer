@@ -7,6 +7,238 @@ import path from 'node:path'
 import fs from 'node:fs/promises'
 import { generateRobotsTxt } from './lib/robots'
 
+// Lightweight route expander for dump sampling
+function expandLike(
+  routes: string[],
+  params?: Record<string, string[]>,
+  routeParams?: Record<string, Record<string, string[]>>
+): string[] {
+  const defaults: Record<string, string[]> = {
+    id: ['1', '2'],
+    slug: ['sample', 'example'],
+    lang: ['en', 'es'],
+    locale: ['en', 'en-US'],
+  }
+  const getVals = (name: string) => (params?.[name]?.length ? params[name] : defaults[name] ?? ['sample'])
+  const out = new Set<string>()
+  for (const r of routes) {
+    if (!r.includes(':')) { out.add(r); continue }
+    const segs = r.split('/')
+    let seed = [''] as string[]
+    const routeSpecific = routeParams?.[r]
+    for (const seg of segs) {
+      if (!seg) continue
+      const m = seg.match(/^:(.+?)(\*)?$/)
+      if (!m) { seed = seed.map((s) => s + '/' + seg); continue }
+      const name = m[1]
+      const star = Boolean(m[2])
+      const vals = routeSpecific?.[name]?.length ? routeSpecific[name] : getVals(name)
+      const next: string[] = []
+      for (const s of seed) for (const v of vals) next.push(s + '/' + (star ? v + '/extra' : v))
+      seed = next
+    }
+    seed.forEach((s) => out.add(s || '/'))
+  }
+  return Array.from(out)
+}
+
+// SvelteKit: derive route patterns from src/routes
+async function svelteKitFsRoutes(projectRoot: string) {
+  const { globby } = await import('globby')
+  const path = await import('node:path')
+  const fs = await import('node:fs/promises')
+  const dir = path.join(projectRoot, 'src', 'routes')
+  const files = await globby(['**/*', '!**/*.d.ts'], { cwd: dir, dot: false })
+  const set = new Set<string>()
+  const paramNames = new Set<string>()
+  for (const f of files) {
+    if (!(/\+page\.|\.svelte$/.test(f))) continue
+    const route = toSvelteRouteFromRel(f, path)
+    set.add(route)
+    const mm = route.match(/:([A-Za-z0-9_]+)/g)
+    mm?.forEach((m) => paramNames.add(m.slice(1)))
+  }
+  // Try to sample a few blog slugs
+  const slugs = new Set<string>(['welcome', 'hello-world'])
+  try {
+    const blog = await globby(['blog/*', 'blog/**/+page.*'], { cwd: dir })
+    for (const f of blog) {
+      const base = f.split('/').pop() || ''
+      const name = base.replace(/\+page\..+$/, '').replace(/\..+$/, '')
+      if (name && name !== 'index') slugs.add(name)
+    }
+  } catch {}
+  return { routesFromFs: Array.from(set).sort(), params: Array.from(paramNames), blogSlugSamples: Array.from(slugs).slice(0, 8), buildDirs: ['build'] }
+}
+
+function toSvelteRouteFromRel(rel: string, pathMod: typeof import('node:path')): string {
+  rel = rel.replace(/^\/+/, '')
+  const parts = rel.split(pathMod.sep)
+  if (/^\+page(\.|$)/.test(parts[parts.length - 1]) || /^\+layout(\.|$)/.test(parts[parts.length - 1])) parts.pop()
+  const mapped = parts.map((seg) =>
+    seg
+      .replace(/\[(\.\.\.)?(.+?)\]/g, (_m, dots, name) => (dots ? `:${name}*` : `:${name}`))
+      .replace(/^\(.*\)$/, '')
+  )
+  const route = '/' + mapped.filter(Boolean).join('/')
+  return route || '/'
+}
+
+// Angular: read angular.json for outputPath and scan routing files for path entries
+async function angularRouteHints(projectRoot: string) {
+  const path = await import('node:path')
+  const fs = await import('node:fs/promises')
+  const { globby } = await import('globby')
+  let projectName: string | undefined
+  let outputPath: string | undefined
+  try {
+    const aj = JSON.parse(await fs.readFile(path.join(projectRoot, 'angular.json'), 'utf8'))
+    projectName = aj.defaultProject || Object.keys(aj.projects || {})[0]
+    const proj = projectName ? aj.projects?.[projectName] : undefined
+    outputPath = proj?.architect?.build?.options?.outputPath
+  } catch {}
+  const routingFiles = await globby(['src/app/**/*routing*.ts', 'src/app/**/app-routing.module.ts', 'src/app/**/*.ts', '!**/*.spec.ts'], { cwd: projectRoot })
+  const routeSet = new Set<string>()
+  const lazyModules = new Set<string>()
+  const pathRe = /\bpath\s*:\s*['"`]([^'"`]+)['"`]/g
+  const loadChildrenArrow = /loadChildren\s*:\s*\(\)\s*=>\s*import\(\s*['"`]([^'"`]+)['"`]\s*\)/g
+  const loadChildrenString = /loadChildren\s*:\s*['"`]([^'"`]+)['"`]/g
+  for (const rel of routingFiles) {
+    try {
+      const abs = path.join(projectRoot, rel)
+      const src = await fs.readFile(abs, 'utf8')
+      let m: RegExpExecArray | null
+      while ((m = pathRe.exec(src))) {
+        const p = m[1]
+        if (typeof p === 'string') routeSet.add(p)
+      }
+      while ((m = loadChildrenArrow.exec(src))) {
+        lazyModules.add(m[1])
+      }
+      while ((m = loadChildrenString.exec(src))) {
+        lazyModules.add(m[1])
+      }
+    } catch {}
+  }
+  const routes = Array.from(routeSet).filter((r) => r && r !== '**').map((r) => (r.startsWith('/') ? r : '/' + r))
+  return { projectName, outputPath, routes: routes.sort(), lazyModules: Array.from(lazyModules).sort() }
+}
+
+// Nuxt: filesystem routes (Nuxt 2 underscore or Nuxt 3 bracket), i18n locales, content slugs
+async function nuxtFsRoutes(projectRoot: string) {
+  const path = await import('node:path')
+  const fs = await import('node:fs/promises')
+  const { globby } = await import('globby')
+  const pagesDir = path.join(projectRoot, 'pages')
+  const exists = await fs.stat(pagesDir).then((s) => s.isDirectory()).catch(() => false)
+  const routes = new Set<string>()
+  const paramNames = new Set<string>()
+  if (exists) {
+    const files = await globby(['**/*.{vue,js,ts}', '!**/*.d.ts'], { cwd: pagesDir, dot: false })
+    for (const f of files) {
+      const r = toNuxtRouteFromRel(f)
+      if (!r) continue
+      routes.add(r)
+      const mm = r.match(/:([A-Za-z0-9_]+)/g)
+      mm?.forEach((m) => paramNames.add(m.slice(1)))
+    }
+  }
+  // i18n locales from nuxt.config.* or locales dir
+  const locales = new Set<string>()
+  try {
+    const cfgs = await globby(['nuxt.config.*'], { cwd: projectRoot })
+    for (const rel of cfgs) {
+      const txt = await fs.readFile(path.join(projectRoot, rel), 'utf8')
+      const m = txt.match(/locales\s*:\s*\[([^\]]*)\]/)
+      if (m) {
+        const raw = m[1]
+        const rx = /['\"]([^'\"]+)['\"]/g
+        let t: RegExpExecArray | null
+        while ((t = rx.exec(raw))) locales.add(t[1])
+      }
+    }
+  } catch {}
+  try {
+    const locs = await globby(['locales/*.*'], { cwd: projectRoot })
+    for (const rel of locs) {
+      const base = rel.split('/').pop() || ''
+      const code = base.replace(/\..+$/, '')
+      if (code) locales.add(code)
+    }
+  } catch {}
+  // Content/blog slugs (when @nuxt/content)
+  const blogSlugs = new Set<string>()
+  try {
+    const md = await globby(['content/**/blog/**/*.{md,mdx,mdoc}', 'content/blog/**/*.{md,mdx,mdoc}'], { cwd: projectRoot })
+    for (const rel of md) {
+      const name = rel.split('/').pop() || ''
+      const slug = name.replace(/\..+$/, '')
+      if (slug.toLowerCase() !== 'index') blogSlugs.add(slug)
+    }
+  } catch {}
+  return { routesFromPages: Array.from(routes).sort(), params: Array.from(paramNames).sort(), locales: Array.from(locales).sort(), blogSlugSamples: Array.from(blogSlugs).slice(0, 12), buildDirs: ['.output/public', 'dist'] }
+}
+
+function toNuxtRouteFromRel(rel: string) {
+  let p = rel.replace(/\\/g, '/').replace(/\.(vue|js|ts)$/i, '')
+  p = p.replace(/(^|\/)index$/g, '$1')
+  const segs = p.split('/').filter(Boolean)
+  const out: string[] = []
+  for (let seg of segs) {
+    // Nuxt 3 bracket params
+    seg = seg.replace(/^\[(\.\.\.)?(.+?)\]$/, (_m, dots, name) => (dots ? `:${name}*` : `:${name}`))
+    // Nuxt 2 underscore params
+    if (seg.startsWith('_')) seg = ':' + seg.slice(1)
+    out.push(seg)
+  }
+  const route = '/' + out.join('/')
+  return route || '/'
+}
+
+// Remix: filesystem routes under app/routes with $param, dotted segments, and pathless (parentheses) segments
+async function remixFsRoutes(projectRoot: string) {
+  const path = await import('node:path')
+  const fs = await import('node:fs/promises')
+  const { globby } = await import('globby')
+  const routesDir = path.join(projectRoot, 'app', 'routes')
+  const exists = await fs.stat(routesDir).then((s) => s.isDirectory()).catch(() => false)
+  const routes = new Set<string>()
+  const params = new Set<string>()
+  if (exists) {
+    const files = await globby(['**/*.{tsx,jsx,ts,js,md,mdx}'], { cwd: routesDir, dot: false })
+    for (const f of files) {
+      const r = toRemixRouteFromRel(f)
+      if (!r) continue
+      routes.add(r)
+      const mm = r.match(/:([A-Za-z0-9_]+)/g)
+      mm?.forEach((m) => params.add(m.slice(1)))
+    }
+  }
+  return { routesFromFs: Array.from(routes).sort(), params: Array.from(params).sort(), buildDirs: ['public', 'build'] }
+}
+
+function toRemixRouteFromRel(rel: string) {
+  let p = rel.replace(/\\/g, '/').replace(/\.(tsx|jsx|ts|js|md|mdx)$/i, '')
+  // Remove trailing /index
+  p = p.replace(/(^|\/)index$/g, '$1')
+  const parts = p.split('/')
+  const mapped: string[] = []
+  for (let seg of parts) {
+    if (!seg) continue
+    // drop pathless layout segments
+    if (/^\(.*\)$/.test(seg)) continue
+    // Dotted segments become nested path segments
+    const subs = seg.split('.')
+    for (let s of subs) {
+      if (!s) continue
+      if (s.startsWith('$')) mapped.push(':' + s.slice(1))
+      else mapped.push(s)
+    }
+  }
+  const route = '/' + mapped.filter(Boolean).join('/')
+  return route || '/'
+}
+
 const program = new Command()
   .name('llmoptimizer')
   .description('Generate llms.txt summaries for websites (framework-agnostic).')
@@ -36,13 +268,13 @@ program
   .option('--routes <pattern...>', 'Explicit route patterns to include (e.g., /blog/:slug /docs/:lang/getting-started)')
   .option('--build-scan', 'Scan common build output folders for HTML (no crawling)')
   .option('--build-dirs <dir...>', 'Directories to scan for HTML (relative to project root)')
-  .option('--theme <name>', 'Markdown theme: default|compact|detailed', 'default')
+  .option('--theme <name>', 'Markdown theme: default|compact|detailed|structured', 'structured')
   .action(async (opts) => {
     const cfg = await loadConfig()
     const maxPages = Number(opts.maxPages ?? cfg.maxPages ?? 100)
     const concurrency = Number(opts.concurrency ?? cfg.concurrency ?? 5)
     const format = (opts.format ?? cfg.output?.format ?? 'markdown') as 'markdown' | 'json'
-    const theme = (opts.theme ?? cfg.render?.theme ?? 'default') as 'default' | 'compact' | 'detailed'
+    const theme = (opts.theme ?? cfg.render?.theme ?? 'structured') as 'default' | 'compact' | 'detailed' | 'structured'
     const fetchDelayMs = opts.fetchDelayMs ? Number(opts.fetchDelayMs) : cfg.network?.delayMs
     const sitemapConcurrency = opts.sitemapConcurrency ? Number(opts.sitemapConcurrency) : cfg.network?.sitemap?.concurrency
     const sitemapDelayMs = opts.sitemapDelayMs ? Number(opts.sitemapDelayMs) : cfg.network?.sitemap?.delayMs
@@ -72,6 +304,7 @@ program
         exclude: opts.exclude ?? cfg.exclude,
         toMarkdownFn,
         theme,
+        renderOptions: cfg.render?.structured,
       })
       console.log(`Generated ${result.outFile} with ${result.pages.length} pages.`)
       return
@@ -88,6 +321,13 @@ program
         include: opts.include ?? cfg.include,
         exclude: opts.exclude ?? cfg.exclude,
         theme,
+        baseUrl: opts.url ?? cfg.baseUrl,
+        concurrency,
+        obeyRobots: opts.robots ?? cfg.obeyRobots ?? true,
+        requestDelayMs: fetchDelayMs,
+        maxPages,
+        log: true,
+        renderOptions: cfg.render?.structured,
       })
       console.log(`Generated ${result.outFile} with ${result.pages.length} pages (build scan).`)
       return
@@ -115,6 +355,7 @@ program
         routeParamsMap,
         explicitRoutes: opts.routes ?? cfg.routes,
         theme,
+        renderOptions: cfg.render?.structured,
       })
       console.log(`Generated ${result.outFile} with ${result.pages.length} pages.`)
       return
@@ -135,6 +376,7 @@ program
         theme,
         sitemapConcurrency: sitemapConcurrency ?? 4,
         sitemapDelayMs: sitemapDelayMs ?? 0,
+        renderOptions: cfg.render?.structured,
       })
       console.log(`Generated ${result.outFile} with ${result.pages.length} pages.`)
       return
@@ -153,6 +395,7 @@ program
         toMarkdownFn,
         theme,
         requestDelayMs: fetchDelayMs,
+        renderOptions: cfg.render?.structured,
       })
       console.log(`Generated ${result.outFile} with ${result.pages.length} pages.`)
       return
@@ -160,6 +403,160 @@ program
 
     console.error('Specify one of: --url, --sitemap, --root, --build-scan, or --adapter')
     process.exit(1)
+  })
+
+program
+  .command('dump')
+  .description('Debug: dump discovered routes/params/buildDirs as JSON')
+  .option('--project-root <dir>', 'Project root for adapter detection', '.')
+  .option('--base-url <url>', 'Optional base URL to fetch a small sample of pages')
+  .option('--sample <n>', 'Number of pages to fetch when --base-url is provided (default 5)', '5')
+  .option('--scan-build', 'Scan common build output dirs for HTML and include results')
+  .option('--build-dirs <dir...>', 'Directories to scan for HTML (relative to project root)')
+  .option('--include <glob...>', 'Include URL/file patterns')
+  .option('--exclude <glob...>', 'Exclude URL/file patterns')
+  .option('--framework-details', 'Include framework-specific route insights (Angular, SvelteKit)', false)
+  .option('--out <file>', 'Write JSON to file (default: stdout)')
+  .action(async (opts) => {
+    const root = path.resolve(opts.projectRoot ?? '.')
+    const { detectRoutes } = await import('./adapters')
+    const detected = await detectRoutes(root)
+    const out: any = { projectRoot: root, detected: Boolean(detected), result: detected }
+    // If Next detected, include extractor details
+    if (detected) {
+      try {
+        const pkg = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8'))
+        if (pkg.dependencies?.next || pkg.devDependencies?.next) {
+          const { extractNextRoutes } = await import('./lib/next-extract')
+          out.next = await extractNextRoutes(root)
+        }
+      } catch {}
+    }
+    // Optional: framework-specific route insights
+    if (opts.frameworkDetails) {
+      try {
+        const pkg = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8'))
+        // SvelteKit: scan src/routes → derive route patterns and params
+        if (pkg.dependencies?.['@sveltejs/kit'] || pkg.devDependencies?.['@sveltejs/kit']) {
+          const svelte = await svelteKitFsRoutes(root)
+          out.sveltekit = svelte
+        }
+        // Nuxt: pages/ scanner and i18n/content hints
+        if (pkg.dependencies?.nuxt || pkg.devDependencies?.nuxt) {
+          const nuxt = await nuxtFsRoutes(root)
+          out.nuxt = nuxt
+        }
+        // Angular: angular.json + scan routing files for path entries
+        if (pkg.dependencies?.['@angular/core'] || pkg.devDependencies?.['@angular/core']) {
+          const angular = await angularRouteHints(root)
+          out.angular = angular
+        }
+        // Remix: app/routes scanner
+        if (pkg.dependencies?.['@remix-run/node'] || pkg.dependencies?.['@remix-run/react'] || pkg.devDependencies?.['@remix-run/node'] || pkg.devDependencies?.['@remix-run/react']) {
+          const remix = await remixFsRoutes(root)
+          out.remix = remix
+        }
+      } catch {}
+    }
+    // Optional: scan build dirs for HTML
+    if (opts.scanBuild) {
+      const { globby } = await import('globby')
+      const buildDirs: string[] = (opts.buildDirs as string[] | undefined) ?? (detected?.buildDirs ?? [
+        'dist', 'build', 'out', 'public',
+        '.next/server/pages', '.next/server/app', '.next/export',
+        '.output/public',
+        'build',
+        'public',
+        'dist', 'dist/*/browser',
+      ])
+      const scanned: Array<{ dir: string; files: number }> = []
+      const pages: Array<{ path: string; route: string; title?: string }> = []
+      for (const dir of buildDirs) {
+        const absDir = path.join(root, dir)
+        try {
+          const stat = await fs.stat(absDir)
+          if (!stat.isDirectory()) continue
+          const files = await globby(['**/*.html', '**/*.htm'], { cwd: absDir, ignore: ['node_modules/**'] })
+          scanned.push({ dir, files: files.length })
+          // Sample a few and extract titles
+          const sample = files.slice(0, 10)
+          for (const rel of sample) {
+            const abs = path.join(absDir, rel)
+            try {
+              const html = await fs.readFile(abs, 'utf8')
+              const { extractFromHtml } = await import('./lib/extractor')
+              const fakeUrl = 'file://' + abs
+              const pe = extractFromHtml(fakeUrl, html)
+              pages.push({ path: path.join(dir, rel).replace(/\\/g, '/'), route: '/' + rel.replace(/\\/g, '/').replace(/index\.html?$/i, '').replace(/\.html?$/i, ''), title: pe.title })
+            } catch {}
+          }
+        } catch {
+          // skip missing
+        }
+      }
+      out.buildScan = { scanned, samplePages: pages }
+    }
+    // Optional: fetch a small sample of pages from baseUrl
+    if (opts.baseUrl) {
+      try {
+        const baseUrl = opts.baseUrl as string
+        const sampleN = Math.max(1, Number(opts.sample ?? 5))
+        const routes = (detected?.routes ?? ['/']).filter((r: string) => typeof r === 'string' && r.startsWith('/'))
+        const expanded = expandLike(routes, detected?.params, detected?.routeParams)
+        const seeds = expanded.slice(0, sampleN).map((r: string) => new URL(r, baseUrl).toString())
+        const include = opts.include as string[] | undefined
+        const exclude = opts.exclude as string[] | undefined
+        const filtered: string[] = []
+        function matchSimple(pattern: string, input: string) {
+          if (pattern.includes('*')) {
+            const re = new RegExp('^' + pattern.split('*').map((s) => s.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')).join('.*') + '$')
+            return re.test(input)
+          }
+          return input.includes(pattern)
+        }
+        for (const u of seeds) {
+          const routePath = new URL(u).pathname
+          const matches = (pat: string) => matchSimple(pat, routePath)
+          if (include && !include.some(matches)) continue
+          if (exclude && exclude.some(matches)) continue
+          filtered.push(u)
+        }
+        const concurrency = 5
+        const pages: any[] = []
+        let i = 0
+        const pool = new Array(concurrency).fill(0)
+        const { extractFromHtml } = await import('./lib/extractor')
+        async function runOne() {
+          while (i < filtered.length) {
+            const idx = i++
+            const u = filtered[idx]
+            try {
+              const res = await fetch(u)
+              const ct = res.headers.get('content-type') || ''
+              if (res.ok && ct.includes('text/html')) {
+                const html = await res.text()
+                const pe = extractFromHtml(u, html)
+                pages.push({ url: u, status: res.status, title: pe.title, description: pe.description, wordCount: pe.wordCount })
+              } else {
+                pages.push({ url: u, status: res.status })
+              }
+            } catch {
+              pages.push({ url: u, error: true })
+            }
+          }
+        }
+        await Promise.all(pool.map(() => runOne()))
+        out.sampleFetch = { baseUrl, requested: filtered.length, pages }
+      } catch {}
+    }
+    const json = JSON.stringify(out, null, 2)
+    if (opts.out) {
+      await fs.mkdir(path.dirname(path.resolve(opts.out)), { recursive: true })
+      await fs.writeFile(opts.out, json)
+      console.log(`Wrote ${opts.out}`)
+    } else {
+      console.log(json)
+    }
   })
 
 program

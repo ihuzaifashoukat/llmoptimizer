@@ -1,6 +1,6 @@
 {
   "name": "llmoptimizer",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Generate an llms.txt summary of your website/docs for LLMs (framework-agnostic with Vite/Next/Nuxt/Astro/Remix helpers).",
   "license": "MIT",
   "type": "module",
@@ -37,6 +37,14 @@
       "import": "./dist/remix.js",
       "require": "./dist/remix.cjs"
     },
+    "./sveltekit": {
+      "import": "./dist/sveltekit.js",
+      "require": "./dist/sveltekit.cjs"
+    },
+    "./angular": {
+      "import": "./dist/angular.js",
+      "require": "./dist/angular.cjs"
+    },
     "./node": {
       "import": "./dist/node.js",
       "require": "./dist/node.cjs"
@@ -63,6 +71,10 @@
     "typecheck": "tsc --noEmit",
     "clean": "rimraf dist",
     "prepublishOnly": "npm run clean && npm run build && npm pack --dry-run"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   },
   "sideEffects": false,
   "keywords": [
@@ -96,6 +108,14 @@
     "LICENSE",
     "llmoptimizer.config.example.ts"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ihuzaifashoukat/llmoptimizer.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ihuzaifashoukat/llmoptimizer/issues"
+  },
+  "homepage": "https://github.com/ihuzaifashoukat/llmoptimizer#readme",
   "dependencies": {
     "cheerio": "^1.0.0",
     "commander": "^12.0.0",

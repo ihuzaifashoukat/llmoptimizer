@@ -18,6 +18,8 @@ export default defineConfig({
     node: 'src/integrations/node.ts',
     auto: 'src/integrations/auto.ts',
     docs: 'src/integrations/docs.ts',
+    sveltekit: 'src/integrations/sveltekit.ts',
+    angular: 'src/integrations/angular.ts',
   },
   shims: false,
   minify: false,

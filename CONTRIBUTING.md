@@ -11,7 +11,7 @@ Thanks for your interest in contributing! This guide helps you set up the projec
 
 1) Clone and install
 ```
-git clone <repo-url>
+git clone https://github.com/ihuzaifashoukat/llmoptimizer
 cd llmoptimizer
 npm install
 ```

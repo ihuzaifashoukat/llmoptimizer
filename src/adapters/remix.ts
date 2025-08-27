@@ -48,4 +48,40 @@ export const RemixAdapter: FrameworkAdapter = {
     }
     return { routes: Array.from(routes), buildDirs: ['public'] }
   },
+  async discoverParams(ctx: AdapterContext) {
+    const params: Record<string, string[]> = {}
+    // Derive param names from route patterns
+    try {
+      const dir = path.join(ctx.projectRoot, 'app', 'routes')
+      const files = await globby(['**/*.{tsx,ts,jsx,js,md,mdx}'], { cwd: dir, dot: false })
+      const names = new Set<string>()
+      for (const f of files) {
+        const route = remixFileToRoute(f)
+        const mm = route.match(/:([A-Za-z0-9_]+)/g)
+        mm?.forEach((m) => names.add(m.slice(1)))
+      }
+      for (const n of names) {
+        if (n === 'slug') params[n] = ['welcome', 'hello-world']
+        else if (n === 'id') params[n] = ['1', '2', '42']
+        else params[n] = ['sample']
+      }
+    } catch {}
+    // Blog/content slugs
+    const slugSet = new Set<string>(['welcome', 'hello-world'])
+    try {
+      const blogFiles = await globby(['app/routes/blog/*.*', 'app/routes/blog/**/_index.*'], { cwd: ctx.projectRoot })
+      for (const f of blogFiles) {
+        const base = path.basename(f, path.extname(f))
+        if (base && base !== 'index' && !base.startsWith('_')) slugSet.add(base)
+      }
+    } catch {}
+    params['slug'] = Array.from(slugSet)
+    return params
+  },
+  async discoverRouteParams(ctx: AdapterContext) {
+    const routeParams: Record<string, Record<string, string[]>> = {}
+    const samples = await (this.discoverParams as any)(ctx).catch(() => ({}))
+    if (samples?.slug?.length) routeParams['/blog/:slug'] = { slug: samples.slug }
+    return routeParams
+  },
 }

@@ -44,7 +44,24 @@ export const ConfigSchema = z.object({
     .object({
       // Optional custom markdown renderer (only in TS/JS config files)
       markdown: z.function().args(z.any(), z.any()).returns(z.string()).optional(),
-      theme: z.enum(['default', 'compact', 'detailed']).optional(),
+      theme: z.enum(['default', 'compact', 'detailed', 'structured']).optional(),
+      structured: z
+        .object({
+          limits: z
+            .object({
+              headings: z.number().optional(),
+              links: z.number().optional(),
+              images: z.number().optional(),
+            })
+            .optional(),
+          categories: z
+            .object({
+              order: z.array(z.string()).optional(),
+              keywords: z.record(z.array(z.string())).optional(),
+            })
+            .optional(),
+        })
+        .optional(),
     })
     .optional(),
   output: z
