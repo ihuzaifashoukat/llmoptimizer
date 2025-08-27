@@ -26,7 +26,7 @@ jobs:
           const s=fs.readFileSync('src/cli.ts','utf8');
           const m=s.match(/\.version\('(.*?)'\)/);
           if(!m){console.error('CLI version not found in src/cli.ts');process.exit(1)}
-          if(m[1]!==pkg.version){console.error(`Version mismatch: cli ${m[1]} vs pkg ${pkg.version}`);process.exit(1)}
+          if(m[1]!==pkg.version){console.error('Version mismatch: cli ' + m[1] + ' vs pkg ' + pkg.version);process.exit(1)}
           console.log('Version OK:', m[1]);"
 
       - name: Lint for legacy llm.txt references

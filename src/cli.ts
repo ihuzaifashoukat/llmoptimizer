@@ -242,7 +242,7 @@ function toRemixRouteFromRel(rel: string) {
 const program = new Command()
   .name('llmoptimizer')
   .description('Generate llms.txt summaries for websites (framework-agnostic).')
-  .version('1.0.0')
+  .version('1.1.0')
 
 program
   .command('generate')

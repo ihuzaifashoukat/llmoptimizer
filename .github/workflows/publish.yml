@@ -32,7 +32,7 @@ jobs:
           const s=fs.readFileSync('src/cli.ts','utf8');
           const m=s.match(/\.version\('(.*?)'\)/);
           if(!m) throw new Error('CLI version not found');
-          if(m[1]!==pkg.version) throw new Error(`Version mismatch: cli ${m[1]} vs pkg ${pkg.version}`);
+          if(m[1]!==pkg.version) throw new Error('Version mismatch: cli ' + m[1] + ' vs pkg ' + pkg.version);
           console.log('Version OK:', m[1]);"
 
       - name: Publish
